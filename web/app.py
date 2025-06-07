@@ -15,6 +15,7 @@ sys.path.insert(0, str(project_root))
 from flask import Flask, render_template, request, jsonify, send_file
 from core.forensic_analyzer import ForensicAnalyzer
 from core.css_style_checker import CSSStyleChecker
+from core.file_matcher import unzip_to_tempdir, match_and_compare_all
 
 app = Flask(__name__)
 analyzer = ForensicAnalyzer()
@@ -207,6 +208,100 @@ def analyze():
             'css_result': report_data.get('css_comparison', {}),
             'report_url': '/download/report'
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/analyze_zip', methods=['POST'])
+def analyze_zip():
+    """Handle two zip file uploads, run full project comparison, and return JSON for UI."""
+    try:
+        if 'original_zip' not in request.files or 'modified_zip' not in request.files:
+            return jsonify({'error': 'Both original and modified zip files are required.'}), 400
+        orig_zip = request.files['original_zip']
+        mod_zip = request.files['modified_zip']
+        if not orig_zip.filename.endswith('.zip') or not mod_zip.filename.endswith('.zip'):
+            return jsonify({'error': 'Only .zip files are accepted.'}), 400
+        # Save and unzip
+        with tempfile.NamedTemporaryFile(suffix='.zip', delete=False, dir=TEMP_DIR) as orig_zip_temp:
+            orig_zip.save(orig_zip_temp)
+            orig_zip_path = orig_zip_temp.name
+        with tempfile.NamedTemporaryFile(suffix='.zip', delete=False, dir=TEMP_DIR) as mod_zip_temp:
+            mod_zip.save(mod_zip_temp)
+            mod_zip_path = mod_zip_temp.name
+        orig_dir = unzip_to_tempdir(orig_zip_path)
+        mod_dir = unzip_to_tempdir(mod_zip_path)
+        # Run matcher
+        results = match_and_compare_all(orig_dir, mod_dir)
+        # Aggregate summary for all matched pairs (robust version)
+        def aggregate_html_summary(pairs):
+            total = matching = different = missing = extra = 0
+            for pair in pairs:
+                summary = pair.get('details', {}).get('summary', {}).get('html', {})
+                total += summary.get('total_elements', 0)
+                matching += summary.get('matching_elements', 0)
+                different += summary.get('different_elements', 0)
+                missing += summary.get('missing_elements', 0)
+                extra += summary.get('extra_elements', 0)
+            return {
+                'total_elements': total,
+                'matching_elements': matching,
+                'different_elements': different,
+                'missing_elements': missing,
+                'extra_elements': extra
+            }
+
+        def aggregate_jsx_summary(pairs):
+            total = matching = different = missing = extra = 0
+            for pair in pairs:
+                summary = pair.get('details', {}).get('summary', {}).get('jsx', {})
+                total += summary.get('total_elements', 0)
+                matching += summary.get('matching_elements', 0)
+                different += summary.get('different_elements', 0)
+                missing += summary.get('missing_elements', 0)
+                extra += summary.get('extra_elements', 0)
+            return {
+                'total_elements': total,
+                'matching_elements': matching,
+                'different_elements': different,
+                'missing_elements': missing,
+                'extra_elements': extra
+            }
+
+        def aggregate_css_summary(pairs):
+            total = matching = different = missing = extra = 0
+            for pair in pairs:
+                details = pair.get('details', {})
+                matching += details.get('matching_selectors', 0)
+                different += details.get('different_selectors', 0)
+                missing += details.get('missing_selectors', 0)
+                extra += details.get('extra_selectors', 0)
+            total = matching + different + missing + extra
+            return {
+                'total_selectors': total,
+                'matching_selectors': matching,
+                'different_selectors': different,
+                'missing_selectors': missing,
+                'extra_selectors': extra
+            }
+
+        results['summary'] = {
+            'html': aggregate_html_summary(results.get('html', {}).get('matched_pairs', [])),
+            'jsx': aggregate_jsx_summary(results.get('jsx', {}).get('matched_pairs', [])),
+            'css': aggregate_css_summary(results.get('css', {}).get('matched_pairs', [])),
+        }
+        # Add compatibility field for frontend
+        results['similarity_scores'] = {
+            'overall': results.get('overall_similarity', 0.0),
+            'html': results.get('html', {}).get('aggregate_score', 0.0),
+            'jsx': results.get('jsx', {}).get('aggregate_score', 0.0),
+            'css': results.get('css', {}).get('aggregate_score', 0.0)
+        }
+        # Optionally, save report for download
+        report_path = TEMP_DIR / 'report.json'
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(results, f, indent=2)
+        results['report_url'] = '/download/report'
+        return jsonify(results)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

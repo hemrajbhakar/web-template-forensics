@@ -56,7 +56,7 @@ class ComparisonResult:
                 'jsx': element_counts.copy()
             },
             'details': {
-                'attribute_details': self.attribute_details
+                'attribute_details': {k: v.__dict__ for k, v in self.attribute_details.items()}
             }
         }
 

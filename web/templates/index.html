@@ -15,49 +15,30 @@
         </header>
 
         <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
-            <form id="uploadForm" class="space-y-6">
+            <form id="uploadForm" class="space-y-6" enctype="multipart/form-data">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div class="space-y-4">
-                        <h2 class="text-xl font-semibold text-gray-800">Original Templates</h2>
+                        <h2 class="text-xl font-semibold text-gray-800">Original Project</h2>
                         <div class="space-y-2">
-                            <label class="block text-sm font-medium text-gray-700">HTML Template</label>
-                            <input type="file" name="original_html_file" accept=".html"
-                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-                        </div>
-                        <div class="space-y-2">
-                            <label class="block text-sm font-medium text-gray-700">JSX/TSX Template</label>
-                            <input type="file" name="original_jsx_file" accept=".jsx,.tsx"
-                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-                        </div>
-                        <div class="space-y-2">
-                            <label class="block text-sm font-medium text-gray-700">CSS File</label>
-                            <input type="file" name="original_css_file" accept=".css"
-                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                            <label class="block text-sm font-medium text-gray-700">Original Project Zip</label>
+                            <input type="file" name="original_zip" accept=".zip"
+                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" required>
                         </div>
                     </div>
                     <div class="space-y-4">
-                        <h2 class="text-xl font-semibold text-gray-800">User Templates</h2>
+                        <h2 class="text-xl font-semibold text-gray-800">Modified Project</h2>
                         <div class="space-y-2">
-                            <label class="block text-sm font-medium text-gray-700">HTML Template</label>
-                            <input type="file" name="user_html_file" accept=".html"
-                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-                        </div>
-                        <div class="space-y-2">
-                            <label class="block text-sm font-medium text-gray-700">JSX/TSX Template</label>
-                            <input type="file" name="user_jsx_file" accept=".jsx,.tsx"
-                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-                        </div>
-                        <div class="space-y-2">
-                            <label class="block text-sm font-medium text-gray-700">CSS File</label>
-                            <input type="file" name="user_css_file" accept=".css"
-                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                            <label class="block text-sm font-medium text-gray-700">Modified Project Zip</label>
+                            <input type="file" name="modified_zip" accept=".zip"
+                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" required>
                         </div>
                     </div>
                 </div>
+                <div class="text-sm text-gray-500 mt-2">Upload .zip files containing your project folders. Only .zip files are accepted.</div>
                 <div class="flex justify-center">
                     <button type="submit"
                         class="bg-blue-600 text-white px-6 py-2 rounded-full hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-                        Analyze Templates
+                        Analyze Projects
                     </button>
                 </div>
             </form>
@@ -180,7 +161,7 @@
             document.getElementById('loading').classList.remove('hidden');
             
             try {
-                const response = await fetch('/analyze', {
+                const response = await fetch('/analyze_zip', {
                     method: 'POST',
                     body: formData
                 });
@@ -214,7 +195,20 @@
             // Show prediction tab and set message
             document.getElementById('predictionTab').classList.remove('hidden');
             const predictionMsg = document.getElementById('predictionMessage');
-            predictionMsg.textContent = data.prediction || '';
+            // Format prediction message
+            const predictionObj = data.prediction;
+            let predictionText = '';
+            if (typeof predictionObj === 'object' && predictionObj !== null) {
+                const percent = Math.round((data.similarity_scores?.overall ?? 0) * 100);
+                predictionText = `${predictionObj.overall_match_quality} (${percent}%)`;
+                // Per-type predictions on new lines, smaller text
+                predictionText += `<br><span style='font-size:0.9em'>HTML: ${predictionObj.html_prediction}</span>`;
+                predictionText += `<br><span style='font-size:0.9em'>CSS: ${predictionObj.css_prediction}</span>`;
+                predictionText += `<br><span style='font-size:0.9em'>JSX: ${predictionObj.jsx_prediction}</span>`;
+            } else if (typeof predictionObj === 'string') {
+                predictionText = predictionObj;
+            }
+            predictionMsg.innerHTML = predictionText;
             // Set color based on overall similarity
             let colorClass = 'text-green-600';
             const score = data.similarity_scores && typeof data.similarity_scores.overall === 'number' ? data.similarity_scores.overall : 0;

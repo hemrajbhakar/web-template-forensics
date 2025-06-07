@@ -1,96 +1,100 @@
-# JSX Forensic Analysis Tool
+# Forensic Template Comparison Tool
 
-A powerful tool for analyzing and comparing HTML and JSX/TSX templates to identify structural differences, attribute mismatches, and potential conversion issues.
+## Overview
+This tool performs forensic comparison of two zipped web project folders, analyzing HTML, CSS, and JSX/TSX files for structural and content similarity. It is designed for plagiarism detection, code review, and template analysis.
 
 ## Features
+- **Upload two zip files** (original and modified project folders)
+- **Automatic file matching** using:
+  - Exact path-based match
+  - Fuzzy filename similarity
+  - Structure/content-based matching (AST for HTML/JSX, CSS property comparison)
+  - Content similarity (for CSS)
+  - Contextual (folder/neighbor) matching
+- **Per-file-type comparison** (HTML, CSS, JSX/TSX)
+- **Robust similarity scoring** with penalization for unmatched files
+- **Detailed JSON and UI reporting**
 
-- **Template Comparison**: Compare HTML templates with their JSX/TSX counterparts
-- **Structural Analysis**: Identify matching, different, missing, and extra elements
-- **Attribute Analysis**: Deep comparison of HTML and JSX attributes, including:
-  - Class name normalization
-  - Style attribute parsing
-  - Event handler mapping
-  - Custom attribute handling
-- **Visual Reports**: Interactive web interface with:
-  - Similarity scoring
-  - Element distribution charts
-  - Detailed comparison reports
-  - Downloadable JSON reports
+## How It Works
 
-## Prerequisites
+### 1. Upload & Extraction
+- User uploads two zip files: one for the original project, one for the modified project.
+- Each zip is extracted to a temporary directory.
 
-1. Python 3.8 or higher
-2. Node.js 14.0 or higher
-3. Tree-sitter CLI
+### 2. File Matching Logic
+For each file type (HTML, CSS, JSX/TSX):
+1. **Exact Path-Based Match:**
+   - Files with the same relative path and filename are paired.
+2. **Fuzzy Filename Match:**
+   - Unmatched files are compared by filename similarity (using difflib). Pairs above a threshold are matched.
+3. **Structure/AST-Based Match:**
+   - For HTML/JSX: Compare DOM/AST structure (element count, depth, attributes, etc.).
+   - For CSS: Compare selectors and property sets.
+4. **Content Similarity Match (CSS):**
+   - For remaining unmatched CSS files, compare raw content similarity. Pairs above a threshold are matched.
+5. **Contextual Match:**
+   - Folder hierarchy and neighboring file matches are used to boost confidence for remaining unmatched files.
 
-## Installation
+### 3. Per-File-Type Comparison
+- **HTML/JSX:**
+  - Uses AST/DOM structure comparison (element/tag/attribute analysis, fuzzy text, etc.).
+- **CSS:**
+  - For each matched selector, compares property-value pairs with normalization (e.g., `#fff` == `#ffffff`, `10px` == `10.0px`).
+  - Selector similarity = number of matching properties / total unique properties.
+  - Per-selector similarity is reported in the output.
 
-1. Install Node.js and tree-sitter CLI:
-```bash
-# Install Node.js from https://nodejs.org/
+### 4. Scoring and Penalization
+- For each file type, the aggregate similarity score is:
+  ```
+  final_score = (sum of all similarity scores for matched pairs + 0.0 for each unmatched file) / total number of files involved
+  ```
+  - **Unmatched files** (present in only one folder) are penalized as 0.0 in the score.
+  - **Total number of files** = number of original files + number of modified files - number of unique matched pairs.
+- **CSS selector similarity:**
+  - If selector similarity >= 0.9: counted as exact match.
+  - If 0.3 <= similarity < 0.9: partial credit (actual similarity fraction).
+  - If < 0.3: treated as different.
+- **Overall score** is the average of all per-type scores, weighted by the number of files.
 
-# Install tree-sitter CLI
-npm install -g tree-sitter-cli
+### 5. Output & Reporting
+- The tool returns a detailed JSON report including:
+  - Per-type summary (HTML, CSS, JSX):
+    - Number of files compared, matched, unmatched
+    - List of matched pairs with similarity scores and match type
+    - List of unmatched files (original and modified)
+    - Aggregate similarity score (with penalization)
+    - Per-selector similarity details for CSS
+  - Overall similarity score
+  - Prediction verdicts (overall and per-type)
+- The UI displays:
+  - Overall and per-type similarity scores
+  - Charts and breakdowns for each file type
+  - Prediction verdicts
+  - Lists of unmatched files
 
-# Install tree-sitter JavaScript grammar
-git clone https://github.com/tree-sitter/tree-sitter-javascript
-cd tree-sitter-javascript
-npm install
-tree-sitter generate
+## Example Scoring
+If you have 2 matched CSS files (similarity 0.5 and 0.0) and 2 unmatched files, the final score is:
 ```
-
-2. Clone the repository:
-```bash
-git clone https://github.com/yourusername/jsx-forensic-tool.git
-cd jsx-forensic-tool
-```
-
-3. Create a virtual environment (recommended):
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-4. Install Python dependencies:
-```bash
-pip install -r requirements.txt
+final_score = (0.5 + 0.0 + 0.0 + 0.0) / 4 = 0.125
 ```
 
 ## Usage
+- Run the web app and upload two zip files via the UI.
+- View the detailed similarity report and download the JSON report for further analysis.
 
-### Web Interface
+## Requirements
+- Python 3.8+
+- Flask
+- tinycss2
+- BeautifulSoup4
+- (See requirements.txt for full list)
 
-1. Start the web server:
-```bash
-python web/app.py
-```
+## Notes
+- Unmatched files are penalized in the final similarity score.
+- All normalization and matching logic is robust to whitespace, formatting, and minor code changes.
 
-2. Open your browser and navigate to `http://localhost:5000`
-
-3. Upload your HTML and JSX/TSX files
-
-4. View the analysis results and download detailed reports
-
-### Python API
-
-```python
-from core.forensic_analyzer import ForensicAnalyzer
-
-# Initialize the analyzer
-analyzer = ForensicAnalyzer()
-
-# Analyze files
-result = analyzer.analyze_files('template.html', 'component.jsx')
-
-# Get similarity score
-score = analyzer.get_similarity_score()
-
-# Generate report
-analyzer.generate_report('report.txt')
-
-# Export detailed results
-analyzer.export_results('analysis.json')
-```
+---
+For more details, see the code and comments in `core/file_matcher.py` and `core/css_style_checker.py`.
 
 ## Project Structure
 

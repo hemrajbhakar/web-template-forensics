@@ -160,48 +160,74 @@ class CSSStyleChecker:
             1 * (element_count + pseudo_element_count)
         )
 
-    def compare_rule_dicts(self, rules1, rules2, root_vars1, root_vars2) -> Tuple[int, int, int, int, float]:
-        selectors1 = set(rules1.keys())
-        selectors2 = set(rules2.keys())
-        matching = selectors1 & selectors2
+    def normalize_css_value(self, value: str) -> str:
+        value = value.strip().lower().rstrip(';')
+        if value.startswith('#') and len(value) == 4:
+            value = '#' + ''.join([c*2 for c in value[1:]])
+        if value.endswith('px'):
+            try:
+                value = str(float(value.replace('px', '')))
+            except ValueError:
+                pass
+        return value
+
+    def compute_selector_similarity(self, orig_decl: dict, mod_decl: dict) -> float:
+        # Normalize property keys and values
+        norm_orig = {k.strip().lower(): self.normalize_css_value(v) for k, v in orig_decl.items()}
+        norm_mod = {k.strip().lower(): self.normalize_css_value(v) for k, v in mod_decl.items()}
+        all_props = set(norm_orig.keys()) | set(norm_mod.keys())
+        print(f"  [DEBUG] Comparing selector properties:")
+        print(f"    norm_orig: {norm_orig}")
+        print(f"    norm_mod:  {norm_mod}")
+        if not all_props:
+            return 1.0
+        matches = 0
+        for prop in all_props:
+            val1 = norm_orig.get(prop, "")
+            val2 = norm_mod.get(prop, "")
+            print(f"    Property: '{prop}' | val1: '{val1}' | val2: '{val2}' | match: {val1 == val2}")
+            if val1 == val2:
+                matches += 1
+        print(f"    Selector similarity: {matches}/{len(all_props)} = {matches/len(all_props) if all_props else 1.0}")
+        return matches / len(all_props)
+
+    def compare_rule_dicts(self, rules1, rules2, root_vars1, root_vars2) -> Tuple[int, int, int, int, float, dict]:
+        # Normalize selector keys by stripping whitespace and lowercasing
+        def norm_sel(s):
+            return s.strip().lower()
+        norm_rules1 = {norm_sel(k): v for k, v in rules1.items()}
+        norm_rules2 = {norm_sel(k): v for k, v in rules2.items()}
+        selectors1 = set(norm_rules1.keys())
+        selectors2 = set(norm_rules2.keys())
+        matching = 0
+        partial = 0.0
+        per_selector_details = {}
+        for sel in selectors1 & selectors2:
+            props1 = norm_rules1[sel]
+            props2 = norm_rules2[sel]
+            # Normalize property keys and values
+            norm_props1 = {k.strip().lower(): self.normalize_css_value(self.resolve_vars(v[0], root_vars1) if v[0] and 'var(' in v[0] else v[0]) for k, v in props1.items()}
+            norm_props2 = {k.strip().lower(): self.normalize_css_value(self.resolve_vars(v[0], root_vars2) if v[0] and 'var(' in v[0] else v[0]) for k, v in props2.items()}
+            all_props = set(norm_props1.keys()) | set(norm_props2.keys())
+            match_props = [p for p in all_props if norm_props1.get(p, None) == norm_props2.get(p, None)]
+            similarity = len(match_props) / len(all_props) if all_props else 1.0
+            # For details
+            per_selector_details[sel] = {
+                'similarity': round(similarity, 2),
+                'matching_properties': {p: norm_props1[p] for p in match_props if p in norm_props1},
+                'missing_properties': {p: norm_props1[p] for p in all_props if p in norm_props1 and p not in norm_props2},
+                'extra_properties': {p: norm_props2[p] for p in all_props if p in norm_props2 and p not in norm_props1},
+            }
+            if similarity >= 0.9:
+                matching += 1
+            elif similarity >= 0.3:
+                partial += similarity
+        total = len(selectors1 | selectors2)
+        final_score = (matching + partial) / total if total > 0 else 1.0
         missing = selectors1 - selectors2
         extra = selectors2 - selectors1
-        different = 0
-        specificity_score = 0.0
-        total_specificity = 0.0
-        for sel in matching:
-            props1 = rules1[sel]
-            props2 = rules2[sel]
-            all_props = set(props1.keys()) | set(props2.keys())
-            sel_spec = self.specificity(sel)
-            total_specificity += sel_spec
-            sel_match = True
-            imp_mismatch = False
-            for prop in all_props:
-                v1, imp1 = props1.get(prop, (None, False))
-                v2, imp2 = props2.get(prop, (None, False))
-                # Resolve variables
-                if v1 and 'var(' in v1:
-                    v1 = self.resolve_vars(v1, root_vars1)
-                if v2 and 'var(' in v2:
-                    v2 = self.resolve_vars(v2, root_vars2)
-                v1 = self.normalize_value(v1) if v1 else v1
-                v2 = self.normalize_value(v2) if v2 else v2
-                if v1 != v2 or imp1 != imp2:
-                    sel_match = False
-                    if imp1 != imp2:
-                        imp_mismatch = True
-            if sel_match:
-                specificity_score += sel_spec
-            elif imp_mismatch:
-                specificity_score += 0.2 * sel_spec  # Lower score for !important mismatch
-                different += 1
-            else:
-                specificity_score += 0.5 * sel_spec
-                different += 1
-        for sel in missing | extra:
-            total_specificity += self.specificity(sel)
-        return len(matching), different, len(missing), len(extra), specificity_score / total_specificity if total_specificity else 0.0
+        different = total - matching - len(missing) - len(extra)
+        return matching, different, len(missing), len(extra), final_score, per_selector_details
 
     def compare_keyframes(self, kf1, kf2):
         names1 = set(kf1.keys())
@@ -261,14 +287,14 @@ class CSSStyleChecker:
         rules1, media1, kf1, supports1, root_vars1 = self.parse_css(css1)
         rules2, media2, kf2, supports2, root_vars2 = self.parse_css(css2)
         # Top-level rules
-        m, d, miss, extra, spec_score = self.compare_rule_dicts(rules1, rules2, root_vars1, root_vars2)
+        m, d, miss, extra, spec_score, selector_details = self.compare_rule_dicts(rules1, rules2, root_vars1, root_vars2)
         # Media queries
         all_media = set(media1.keys()) | set(media2.keys())
         media_results = {}
         for mq in all_media:
             mq_rules1 = media1.get(mq, {})
             mq_rules2 = media2.get(mq, {})
-            mm, md, mmiss, mextra, mspec_score = self.compare_rule_dicts(mq_rules1, mq_rules2, root_vars1, root_vars2)
+            mm, md, mmiss, mextra, mspec_score, _ = self.compare_rule_dicts(mq_rules1, mq_rules2, root_vars1, root_vars2)
             media_results[mq] = {
                 "matching_selectors": mm,
                 "different_selectors": md,
@@ -296,5 +322,6 @@ class CSSStyleChecker:
             "media_queries": media_results,
             "keyframes": keyframes_result,
             "supports": supports_result,
-            "summary": summary
+            "summary": summary,
+            "selector_details": selector_details
         } 
