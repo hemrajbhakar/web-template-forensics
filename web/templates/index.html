@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Template Similarity Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="text-center mb-12">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">Template Similarity Analyzer</h1>
+            <p class="text-gray-600">Compare original and user templates to identify similarities and differences</p>
+        </header>
+
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <form id="uploadForm" class="space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-4">
+                        <h2 class="text-xl font-semibold text-gray-800">Original Templates</h2>
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700">HTML Template</label>
+                            <input type="file" name="original_html_file" accept=".html"
+                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                        </div>
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700">JSX Template</label>
+                            <input type="file" name="original_jsx_file" accept=".jsx,.tsx"
+                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                        </div>
+                    </div>
+                    <div class="space-y-4">
+                        <h2 class="text-xl font-semibold text-gray-800">User Templates</h2>
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700">HTML Template</label>
+                            <input type="file" name="user_html_file" accept=".html"
+                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                        </div>
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700">JSX Template</label>
+                            <input type="file" name="user_jsx_file" accept=".jsx,.tsx"
+                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-center">
+                    <button type="submit"
+                        class="bg-blue-600 text-white px-6 py-2 rounded-full hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                        Analyze Templates
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div id="results" class="hidden space-y-8">
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-4">Analysis Results</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-700 mb-4">Overall Similarity</h3>
+                        <div class="relative pt-1">
+                            <div class="flex mb-2 items-center justify-between">
+                                <div>
+                                    <span id="overallScore" class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-blue-600 bg-blue-200">
+                                        0%
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-blue-200">
+                                <div id="overallBar" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-700 mb-4">HTML Similarity</h3>
+                        <div class="relative pt-1">
+                            <div class="flex mb-2 items-center justify-between">
+                                <div>
+                                    <span id="htmlScore" class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-green-600 bg-green-200">
+                                        0%
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-green-200">
+                                <div id="htmlBar" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-green-500" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-700 mb-4">JSX Similarity</h3>
+                        <div class="relative pt-1">
+                            <div class="flex mb-2 items-center justify-between">
+                                <div>
+                                    <span id="jsxScore" class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-purple-600 bg-purple-200">
+                                        0%
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-purple-200">
+                                <div id="jsxBar" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-purple-500" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-white rounded-lg shadow-lg p-6">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">HTML Comparison</h3>
+                    <canvas id="htmlChart"></canvas>
+                </div>
+                <div class="bg-white rounded-lg shadow-lg p-6">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">JSX Comparison</h3>
+                    <canvas id="jsxChart"></canvas>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-semibold text-gray-800">Detailed Report</h2>
+                    <a id="downloadReport" href="#" 
+                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        Download Report
+                    </a>
+                </div>
+                <div id="reportSummary" class="prose max-w-none">
+                    <!-- Report content will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <div id="loading" class="hidden">
+            <div class="fixed top-0 left-0 w-full h-full flex items-center justify-center bg-gray-900 bg-opacity-50">
+                <div class="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-blue-500"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            
+            // Show loading
+            document.getElementById('loading').classList.remove('hidden');
+            
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+                
+                // Update UI with results
+                updateResults(data);
+                
+                // Show results section
+                document.getElementById('results').classList.remove('hidden');
+                
+                // Update download link
+                document.getElementById('downloadReport').href = data.report_url;
+                
+            } catch (error) {
+                alert('An error occurred during analysis');
+                console.error(error);
+            } finally {
+                // Hide loading
+                document.getElementById('loading').classList.add('hidden');
+            }
+        });
+
+        function updateResults(data) {
+            // Update similarity scores
+            updateScore('overall', data.similarity_scores.overall);
+            updateScore('html', data.similarity_scores.html);
+            updateScore('jsx', data.similarity_scores.jsx);
+            
+            // Update HTML chart
+            updateChart('htmlChart', data.summary.html, 'HTML Elements');
+            
+            // Update JSX chart
+            updateChart('jsxChart', data.summary.jsx, 'JSX Elements');
+            
+            // Update summary
+            const summary = document.getElementById('reportSummary');
+            summary.innerHTML = generateSummaryHTML(data.summary);
+        }
+        
+        function updateScore(type, score) {
+            const percentage = Math.round(score * 100);
+            document.getElementById(`${type}Score`).textContent = `${percentage}%`;
+            document.getElementById(`${type}Bar`).style.width = `${percentage}%`;
+        }
+        
+        function updateChart(canvasId, data, label) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Matching', 'Different', 'Missing', 'Extra'],
+                    datasets: [{
+                        data: [
+                            data.matching_elements,
+                            data.different_elements,
+                            data.missing_elements,
+                            data.extra_elements
+                        ],
+                        backgroundColor: [
+                            '#10B981', // green
+                            '#F59E0B', // yellow
+                            '#EF4444', // red
+                            '#6366F1'  // indigo
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        },
+                        title: {
+                            display: true,
+                            text: label
+                        }
+                    }
+                }
+            });
+        }
+        
+        function generateSummaryHTML(summary) {
+            return `
+                <div class="grid grid-cols-2 gap-8">
+                    <div class="space-y-4">
+                        <h3 class="text-lg font-medium text-gray-900">HTML Comparison</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="p-4 bg-gray-50 rounded-lg">
+                                <h4 class="font-medium text-gray-700">Total Elements</h4>
+                                <p class="text-2xl font-bold text-gray-900">${summary.html.total_elements}</p>
+                            </div>
+                            <div class="p-4 bg-green-50 rounded-lg">
+                                <h4 class="font-medium text-green-700">Matching</h4>
+                                <p class="text-2xl font-bold text-green-900">${summary.html.matching_elements}</p>
+                            </div>
+                            <div class="p-4 bg-yellow-50 rounded-lg">
+                                <h4 class="font-medium text-yellow-700">Different</h4>
+                                <p class="text-2xl font-bold text-yellow-900">${summary.html.different_elements}</p>
+                            </div>
+                            <div class="p-4 bg-red-50 rounded-lg">
+                                <h4 class="font-medium text-red-700">Missing/Extra</h4>
+                                <p class="text-2xl font-bold text-red-900">${summary.html.missing_elements + summary.html.extra_elements}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="space-y-4">
+                        <h3 class="text-lg font-medium text-gray-900">JSX Comparison</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="p-4 bg-gray-50 rounded-lg">
+                                <h4 class="font-medium text-gray-700">Total Elements</h4>
+                                <p class="text-2xl font-bold text-gray-900">${summary.jsx.total_elements}</p>
+                            </div>
+                            <div class="p-4 bg-green-50 rounded-lg">
+                                <h4 class="font-medium text-green-700">Matching</h4>
+                                <p class="text-2xl font-bold text-green-900">${summary.jsx.matching_elements}</p>
+                            </div>
+                            <div class="p-4 bg-yellow-50 rounded-lg">
+                                <h4 class="font-medium text-yellow-700">Different</h4>
+                                <p class="text-2xl font-bold text-yellow-900">${summary.jsx.different_elements}</p>
+                            </div>
+                            <div class="p-4 bg-red-50 rounded-lg">
+                                <h4 class="font-medium text-red-700">Missing/Extra</h4>
+                                <p class="text-2xl font-bold text-red-900">${summary.jsx.missing_elements + summary.jsx.extra_elements}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html> 

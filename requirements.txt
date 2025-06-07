@@ -1,0 +1,13 @@
+flask==3.0.2
+beautifulsoup4==4.12.3
+pathlib==1.0.1
+typing-extensions==4.9.0
+opencv-python>=4.8.0
+imagehash>=4.3.1
+Jinja2>=3.1.2
+rich>=13.3.5
+playwright>=1.39.0
+esprima>=4.0.1
+python-dotenv>=1.0.0
+numpy>=1.24.0
+Pillow>=10.0.0

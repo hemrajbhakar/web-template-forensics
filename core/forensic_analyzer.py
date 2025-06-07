@@ -1,0 +1,218 @@
+"""
+Main Forensic Analyzer Interface
+Coordinates HTML and JSX template comparisons.
+"""
+
+from typing import Dict, Optional, Union, Tuple
+from pathlib import Path
+import json
+from .html_parser import HTMLParser
+from .structure_comparator import StructureComparator, ComparisonResult
+
+class TemplateComparison:
+    def __init__(self, 
+                 html_similarity: float,
+                 jsx_similarity: float,
+                 html_details: ComparisonResult,
+                 jsx_details: ComparisonResult):
+        self.html_similarity = html_similarity
+        self.jsx_similarity = jsx_similarity
+        self.html_details = html_details
+        self.jsx_details = jsx_details
+        self.overall_similarity = (html_similarity + jsx_similarity) / 2
+
+class ForensicAnalyzer:
+    def __init__(self):
+        self.html_parser = HTMLParser()
+        self.comparator = StructureComparator()
+        self.last_result: Optional[TemplateComparison] = None
+        
+    def analyze_templates(self,
+                        original_html_path: Union[str, Path],
+                        original_jsx_path: Union[str, Path],
+                        user_html_path: Union[str, Path],
+                        user_jsx_path: Union[str, Path]) -> TemplateComparison:
+        """Analyze and compare original and user templates."""
+        # Parse HTML templates
+        original_html_tree = self.html_parser.parse_file(original_html_path)
+        user_html_tree = self.html_parser.parse_file(user_html_path)
+        
+        # Parse JSX templates
+        with open(original_jsx_path, 'r', encoding='utf-8') as f:
+            original_jsx_content = f.read()
+        with open(user_jsx_path, 'r', encoding='utf-8') as f:
+            user_jsx_content = f.read()
+            
+        original_jsx_tree = self._parse_jsx(original_jsx_content)
+        user_jsx_tree = self._parse_jsx(user_jsx_content)
+        
+        # Compare HTML templates
+        html_result = self.comparator.compare_structures(original_html_tree, user_html_tree)
+        
+        # Compare JSX templates
+        jsx_result = self.comparator.compare_structures(original_jsx_tree, user_jsx_tree)
+        
+        # Create combined result
+        self.last_result = TemplateComparison(
+            html_similarity=html_result.similarity_score,
+            jsx_similarity=jsx_result.similarity_score,
+            html_details=html_result,
+            jsx_details=jsx_result
+        )
+        
+        return self.last_result
+    
+    def _parse_jsx(self, content: str) -> Dict:
+        """Parse JSX content using our Tree-sitter based parser."""
+        # This will be implemented to use our JSX parser
+        # For now, return a simple structure
+        return {
+            "type": "jsx_element",
+            "openingElement": {
+                "name": {"name": "div"},
+                "attributes": []
+            },
+            "children": []
+        }
+    
+    def generate_report(self, output_path: Optional[Union[str, Path]] = None) -> str:
+        """Generate a detailed analysis report."""
+        if not self.last_result:
+            return "No analysis has been performed yet."
+            
+        report = [
+            "Template Comparison Report",
+            "=========================\n",
+            f"Overall Similarity Score: {self.last_result.overall_similarity:.2%}\n",
+            "HTML Template Comparison:",
+            f"- Similarity Score: {self.last_result.html_similarity:.2%}",
+            "- Details:",
+            self.comparator.generate_diff_report(self.last_result.html_details),
+            "\nJSX Template Comparison:",
+            f"- Similarity Score: {self.last_result.jsx_similarity:.2%}",
+            "- Details:",
+            self.comparator.generate_diff_report(self.last_result.jsx_details)
+        ]
+        
+        report_text = "\n".join(report)
+        
+        if output_path:
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(report_text)
+        
+        return report_text
+    
+    def export_results(self, output_path: Union[str, Path]) -> None:
+        """Export analysis results to JSON."""
+        if not self.last_result:
+            raise ValueError("No analysis has been performed yet.")
+        
+        html = self.last_result.html_details
+        jsx = self.last_result.jsx_details
+        
+        result_dict = {
+            "overall_similarity": self.last_result.overall_similarity,
+            "html_comparison": {
+                "similarity_score": self.last_result.html_similarity,
+                "matching_elements": len(html.matching_elements),
+                "different_elements": len(html.different_elements),
+                "missing_elements": len(html.missing_elements),
+                "extra_elements": len(html.extra_elements)
+            },
+            "jsx_comparison": {
+                "similarity_score": self.last_result.jsx_similarity if jsx is not None else 0.0,
+                "matching_elements": len(jsx.matching_elements) if jsx is not None else 0,
+                "different_elements": len(jsx.different_elements) if jsx is not None else 0,
+                "missing_elements": len(jsx.missing_elements) if jsx is not None else 0,
+                "extra_elements": len(jsx.extra_elements) if jsx is not None else 0
+            }
+        }
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(result_dict, f, indent=2)
+            
+    def analyze_html_only(self,
+                      original_html_path: Union[str, Path],
+                      user_html_path: Union[str, Path]) -> TemplateComparison:
+        """Analyze and compare HTML templates only."""
+        # Parse HTML templates
+        original_html_tree = self.html_parser.parse_file(original_html_path)
+        user_html_tree = self.html_parser.parse_file(user_html_path)
+        
+        # Compare HTML templates
+        html_result = self.comparator.compare_structures(original_html_tree, user_html_tree)
+        
+        # Create result with HTML comparison only
+        self.last_result = TemplateComparison(
+            html_similarity=html_result.similarity_score,
+            jsx_similarity=0.0,  # No JSX comparison
+            html_details=html_result,
+            jsx_details=None  # No JSX details
+        )
+        
+        return self.last_result
+        
+    def get_similarity_scores(self) -> Dict[str, float]:
+        """Get all similarity scores from the last analysis."""
+        if not self.last_result:
+            raise ValueError("No analysis has been performed yet.")
+            
+        scores = {
+            'html': self.last_result.html_similarity,
+            'overall': self.last_result.html_similarity  # For HTML-only, overall = HTML score
+        }
+        
+        # Add JSX score only if JSX was compared
+        if self.last_result.jsx_details is not None:
+            scores['jsx'] = self.last_result.jsx_similarity
+            scores['overall'] = self.last_result.overall_similarity
+            
+        return scores
+        
+    def get_structure_summary(self) -> Dict:
+        """Get a summary of structural differences."""
+        if not self.last_result:
+            raise ValueError("No analysis has been performed yet.")
+        
+        html = self.last_result.html_details
+        jsx = self.last_result.jsx_details
+        
+        summary = {
+            "html": {
+                "total_elements": (
+                    len(html.matching_elements) +
+                    len(html.different_elements) +
+                    len(html.missing_elements) +
+                    len(html.extra_elements)
+                ),
+                "matching_elements": len(html.matching_elements),
+                "different_elements": len(html.different_elements),
+                "missing_elements": len(html.missing_elements),
+                "extra_elements": len(html.extra_elements)
+            }
+        }
+        
+        # Add JSX summary only if JSX was compared
+        if jsx is not None:
+            summary["jsx"] = {
+                "total_elements": (
+                    len(jsx.matching_elements) +
+                    len(jsx.different_elements) +
+                    len(jsx.missing_elements) +
+                    len(jsx.extra_elements)
+                ),
+                "matching_elements": len(jsx.matching_elements),
+                "different_elements": len(jsx.different_elements),
+                "missing_elements": len(jsx.missing_elements),
+                "extra_elements": len(jsx.extra_elements)
+            }
+        else:
+            summary["jsx"] = {
+                "total_elements": 0,
+                "matching_elements": 0,
+                "different_elements": 0,
+                "missing_elements": 0,
+                "extra_elements": 0
+            }
+        
+        return summary 

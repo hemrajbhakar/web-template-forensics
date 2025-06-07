@@ -1,0 +1,29 @@
+{
+  "name": "jsx-forensic-tool",
+  "version": "1.0.0",
+  "description": "A sophisticated tool for analyzing and comparing JSX/React components to detect similarities and modifications",
+  "main": "jsx_parser.js",
+  "scripts": {
+    "start": "node jsx_parser.js",
+    "test": "node jsx_parser.js test.jsx",
+    "parse": "node jsx_parser.js"
+  },
+  "keywords": [
+    "jsx",
+    "react",
+    "forensic",
+    "analysis",
+    "tree-sitter",
+    "ast",
+    "comparison"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "tree-sitter": "^0.20.1",
+    "tree-sitter-javascript": "^0.19.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
