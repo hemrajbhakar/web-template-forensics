@@ -8,6 +8,7 @@ import difflib
 from dataclasses import dataclass, field
 import logging
 import json
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -89,7 +90,7 @@ class NodeWrapper:
         return hash(self.hash_key)
 
 class StructureComparator:
-    def __init__(self):
+    def __init__(self, attribute_ignore_list=None):
         self.jsx_to_html_tags = {
             'div': 'div',
             'span': 'span',
@@ -137,6 +138,16 @@ class StructureComparator:
             'paddingTop': 'padding-top',
             'paddingBottom': 'padding-bottom'
         }
+        self.attribute_ignore_list = attribute_ignore_list or []
+
+    def _should_ignore_attr(self, attr_name):
+        for pattern in self.attribute_ignore_list:
+            if pattern.endswith('*'):
+                if attr_name.startswith(pattern[:-1]):
+                    return True
+            elif attr_name == pattern:
+                return True
+        return False
 
     def normalize_jsx_node(self, node: Dict) -> Dict:
         """Convert JSX AST node to a normalized format."""
@@ -272,186 +283,187 @@ class StructureComparator:
             logger.error(f"Error parsing style: {str(e)}", exc_info=True)
             return {}
 
-    def _compare_attributes(self, html_attrs: Dict, jsx_attrs: Dict) -> AttributeComparison:
-        """Perform detailed attribute comparison."""
+    def _compare_attributes(self, html_attrs: Dict, jsx_attrs: Dict):
+        """Perform detailed attribute comparison with ignore list and similarity."""
         matching = {}
         different = {}
         missing = {}
         extra = {}
-        
-        # Compare common attributes
-        for name, html_value in html_attrs.items():
-            if name in jsx_attrs:
-                jsx_value = jsx_attrs[name]
+        total = 0
+        match_count = 0
+        differing_list = []
+
+        # Filter attributes by ignore list
+        html_attrs_f = {k: v for k, v in html_attrs.items() if not self._should_ignore_attr(k)}
+        jsx_attrs_f = {k: v for k, v in jsx_attrs.items() if not self._should_ignore_attr(k)}
+
+        all_keys = set(html_attrs_f.keys()) | set(jsx_attrs_f.keys())
+        for name in all_keys:
+            total += 1
+            html_value = html_attrs_f.get(name)
+            jsx_value = jsx_attrs_f.get(name)
+            if html_value is not None and jsx_value is not None:
                 if self._values_match(html_value, jsx_value):
                     matching[name] = html_value
+                    match_count += 1
                 else:
                     different[name] = (html_value, jsx_value)
-            else:
+                    differing_list.append({'attribute': name, 'html': html_value, 'jsx': jsx_value})
+            elif html_value is not None:
                 missing[name] = html_value
-        
-        # Find extra JSX attributes
-        for name, jsx_value in jsx_attrs.items():
-            if name not in html_attrs:
+                differing_list.append({'attribute': name, 'html': html_value, 'jsx': None})
+            elif jsx_value is not None:
                 extra[name] = jsx_value
-        
+                differing_list.append({'attribute': name, 'html': None, 'jsx': jsx_value})
+
+        attr_similarity = match_count / total if total > 0 else 1.0
         return AttributeComparison(
             matching=matching,
             different=different,
             missing=missing,
             extra=extra
-        )
+        ), differing_list, attr_similarity
 
-    def _is_valid_jsx_node(self, node: Dict) -> bool:
-        """Check if JSX node should be included in comparison."""
-        if node.get('type') == 'jsx_text':
-            return bool(node.get('value', '').strip())
-        return node.get('type') == 'jsx_element'
+    def _fuzzy_text_similarity(self, a: str, b: str) -> float:
+        """Return a similarity score between 0 and 1 for two strings."""
+        return difflib.SequenceMatcher(None, a, b).ratio()
 
     def _compare_nodes(self, html_node: Dict, jsx_node: Dict,
-                      matching: List, different: List, missing: List, extra: List,
-                      attr_details: Dict) -> None:
-        """Compare individual nodes and their children."""
+                      element_comparisons: List, attr_details: Dict) -> None:
         try:
             # Handle text nodes
             if html_node.get('type') == 'text' and jsx_node.get('type') == 'text':
-                logger.debug(f"Comparing text nodes")
-                if html_node.get('content', '').strip() == jsx_node.get('content', '').strip():
-                    logger.debug("Text nodes match")
-                    matching.append((html_node, jsx_node))
+                html_text = html_node.get('content', '').strip()
+                jsx_text = jsx_node.get('content', '').strip()
+                text_similarity = self._fuzzy_text_similarity(html_text, jsx_text)
+                if text_similarity == 1.0:
+                    element_comparisons.append({'type': 'match', 'html': html_node, 'jsx': jsx_node, 'text_similarity': text_similarity})
                 else:
-                    logger.debug("Text nodes differ")
-                    different.append((html_node, jsx_node))
+                    element_comparisons.append({'type': 'different', 'html': html_node, 'jsx': jsx_node, 'attribute_similarity': 1.0, 'text_similarity': text_similarity})
                 return
 
             # Skip script content comparison but count as matching if tags match
             if html_node.get('tag') == 'script' and jsx_node.get('tag') == 'script':
-                logger.debug("Matching script tags, skipping content comparison")
-                matching.append((html_node, jsx_node))
+                element_comparisons.append({'type': 'match', 'html': html_node, 'jsx': jsx_node, 'attribute_similarity': 1.0, 'text_similarity': 1.0})
                 return
-
-            logger.debug(f"Comparing nodes - HTML: {html_node.get('tag', 'unknown')} JSX: {jsx_node.get('tag', 'unknown')}")
 
             html_tag = html_node.get('tag', '').lower()
             jsx_tag = jsx_node.get('tag', '').lower()
 
             if html_tag == jsx_tag:
-                attrs_match = self._compare_attributes(
+                attrs_match, attr_diff_list, attr_similarity = self._compare_attributes(
                     html_node.get('attrs', {}),
                     jsx_node.get('attrs', {})
                 )
                 attr_details[html_tag] = attrs_match
 
-                if attrs_match.different or attrs_match.missing or attrs_match.extra:
-                    logger.debug(f"Attributes differ for tag {html_tag}")
-                    different.append((html_node, jsx_node))
+                html_children = html_node.get('children', [])
+                jsx_children = jsx_node.get('children', [])
+                html_text = self._get_single_text_content(html_children)
+                jsx_text = self._get_single_text_content(jsx_children)
+                text_similarity = None
+                if html_text is not None and jsx_text is not None:
+                    text_similarity = self._fuzzy_text_similarity(html_text, jsx_text)
+
+                if attr_similarity == 1.0 and (text_similarity is None or text_similarity == 1.0):
+                    element_comparisons.append({'type': 'match', 'html': html_node, 'jsx': jsx_node, 'attribute_similarity': attr_similarity, 'text_similarity': text_similarity})
                 else:
-                    logger.debug(f"Nodes match for tag {html_tag}")
-                    matching.append((html_node, jsx_node))
-
-                self._compare_children(
-                    html_node.get('children', []),
-                    jsx_node.get('children', []),
-                    matching, different, missing, extra,
-                    attr_details
-                )
+                    element_comparisons.append({
+                        'type': 'different',
+                        'html': html_node,
+                        'jsx': jsx_node,
+                        'attribute_similarity': attr_similarity,
+                        'text_similarity': text_similarity,
+                        'differing_attributes': attr_diff_list,
+                        'html_text': html_text,
+                        'jsx_text': jsx_text
+                    })
+                if html_text is None or jsx_text is None:
+                    self._compare_children(
+                        html_children,
+                        jsx_children,
+                        element_comparisons,
+                        attr_details
+                    )
             else:
-                logger.debug(f"Tags differ: HTML={html_tag}, JSX={jsx_tag}")
-                different.append((html_node, jsx_node))
-
+                element_comparisons.append({'type': 'different', 'html': html_node, 'jsx': jsx_node, 'attribute_similarity': 0.0, 'text_similarity': 0.0, 'tag_mismatch': True})
         except Exception as e:
             logger.error(f"Error comparing nodes: {str(e)}", exc_info=True)
             raise
 
-    def _compare_children(self, html_children: List, jsx_children: List,
-                         matching: List, different: List, missing: List, extra: List,
-                         attr_details: Dict) -> None:
-        """Compare child nodes using wrapped nodes for comparison."""
-        try:
-            logger.debug(f"Comparing children - HTML count: {len(html_children)}, JSX count: {len(jsx_children)}")
+    def _get_single_text_content(self, children: list) -> str:
+        """If children is a single text node, return its content, else None."""
+        if len(children) == 1 and children[0].get('type') == 'text':
+            return children[0].get('content', '').strip()
+        return None
 
-            # Wrap nodes for comparison
+    def _compare_children(self, html_children: List, jsx_children: List,
+                         element_comparisons: List, attr_details: Dict) -> None:
+        try:
             wrapped_html = [NodeWrapper(node) for node in html_children]
             wrapped_jsx = [NodeWrapper(node) for node in jsx_children]
-
-            # Create sequence matcher with wrapped nodes
             matcher = difflib.SequenceMatcher(None, wrapped_html, wrapped_jsx)
-
-            # Process matching blocks
-            # get_matching_blocks() returns tuples of (i, j, n) where:
-            # i is the start index in sequence 1
-            # j is the start index in sequence 2
-            # n is the length of the match
             matched_html_indices = set()
             matched_jsx_indices = set()
-
             for i, j, n in matcher.get_matching_blocks():
-                if n == 0:  # Skip zero-length matches
+                if n == 0:
                     continue
-                    
                 matched_html_indices.update(range(i, i + n))
                 matched_jsx_indices.update(range(j, j + n))
-                
-                # Compare matched children
                 for offset in range(n):
                     self._compare_nodes(
                         html_children[i + offset],
                         jsx_children[j + offset],
-                        matching, different, missing, extra,
+                        element_comparisons,
                         attr_details
                     )
-
-            # Add unmatched nodes to missing and extra lists
-            missing.extend(html_children[i] for i in range(len(html_children))
-                         if i not in matched_html_indices)
-            extra.extend(jsx_children[j] for j in range(len(jsx_children))
-                        if j not in matched_jsx_indices)
-
+            for i in range(len(html_children)):
+                if i not in matched_html_indices:
+                    element_comparisons.append({'type': 'missing', 'html': html_children[i], 'jsx': None})
+            for j in range(len(jsx_children)):
+                if j not in matched_jsx_indices:
+                    element_comparisons.append({'type': 'extra', 'html': None, 'jsx': jsx_children[j]})
         except Exception as e:
             logger.error(f"Error comparing children: {str(e)}", exc_info=True)
             raise
 
     def compare_structures(self, html_tree: Dict, jsx_tree: Dict) -> ComparisonResult:
-        """Compare HTML and JSX structures."""
         try:
-            logger.info("Starting structure comparison")
-            logger.debug(f"HTML tree: {json.dumps(html_tree, indent=2)}")
-            logger.debug(f"JSX tree: {json.dumps(jsx_tree, indent=2)}")
-
+            element_comparisons = []
+            attr_details = {}
+            if html_tree and jsx_tree:
+                self._compare_nodes(html_tree, jsx_tree, element_comparisons, attr_details)
+            else:
+                if html_tree:
+                    element_comparisons.append({'type': 'missing', 'html': html_tree, 'jsx': None})
+                if jsx_tree:
+                    element_comparisons.append({'type': 'extra', 'html': None, 'jsx': jsx_tree})
+            # Per-element score aggregation
+            element_scores = []
             matching = []
             different = []
             missing = []
             extra = []
-            attr_details = {}
-
-            if html_tree and jsx_tree:
-                self._compare_nodes(html_tree, jsx_tree, matching, different, missing, extra, attr_details)
-            else:
-                logger.warning("One or both trees are empty")
-                if html_tree:
-                    missing.append(html_tree)
-                if jsx_tree:
-                    extra.append(jsx_tree)
-
-            total_elements = len(matching) + len(different) + len(missing) + len(extra)
-            similarity_score = len(matching) / total_elements if total_elements > 0 else 0.0
-
-            logger.info(f"Comparison complete. Similarity score: {similarity_score}")
-            logger.debug(f"Matching elements: {len(matching)}")
-            logger.debug(f"Different elements: {len(different)}")
-            logger.debug(f"Missing elements: {len(missing)}")
-            logger.debug(f"Extra elements: {len(extra)}")
-
-            # Create summary data
-            summary = {
-                'matching_elements': len(matching),
-                'different_elements': len(different),
-                'missing_elements': len(missing),
-                'extra_elements': len(extra),
-                'total_elements': total_elements,
-                'similarity_score': similarity_score
-            }
-
+            for comp in element_comparisons:
+                if comp['type'] == 'match':
+                    element_scores.append(1.0)
+                    matching.append((comp['html'], comp['jsx']))
+                elif comp['type'] == 'different':
+                    attr_score = comp.get('attribute_similarity', 0)
+                    text_score = comp.get('text_similarity', 0)
+                    # If text_score is None, treat as 1.0 (for non-text elements)
+                    if text_score is None:
+                        text_score = 1.0
+                    partial_score = 0.5 * attr_score + 0.5 * text_score
+                    element_scores.append(min(partial_score, 1.0))
+                    different.append((comp['html'], comp['jsx']))
+                elif comp['type'] == 'missing':
+                    element_scores.append(0.0)
+                    missing.append(comp['html'])
+                elif comp['type'] == 'extra':
+                    element_scores.append(0.0)
+                    extra.append(comp['jsx'])
+            similarity_score = sum(element_scores) / len(element_scores) if element_scores else 0.0
             return ComparisonResult(
                 similarity_score=similarity_score,
                 matching_elements=matching,
@@ -460,7 +472,6 @@ class StructureComparator:
                 extra_elements=extra,
                 attribute_details=attr_details
             )
-
         except Exception as e:
             logger.error(f"Error during comparison: {str(e)}", exc_info=True)
             raise

@@ -14,12 +14,16 @@ class TemplateComparison:
                  html_similarity: float,
                  jsx_similarity: float,
                  html_details: ComparisonResult,
-                 jsx_details: ComparisonResult):
+                 jsx_details: ComparisonResult,
+                 jsx_present: bool = True):
         self.html_similarity = html_similarity
         self.jsx_similarity = jsx_similarity
         self.html_details = html_details
         self.jsx_details = jsx_details
-        self.overall_similarity = (html_similarity + jsx_similarity) / 2
+        if jsx_present:
+            self.overall_similarity = (html_similarity + jsx_similarity) / 2
+        else:
+            self.overall_similarity = html_similarity
 
 class ForensicAnalyzer:
     def __init__(self):
@@ -52,12 +56,17 @@ class ForensicAnalyzer:
         # Compare JSX templates
         jsx_result = self.comparator.compare_structures(original_jsx_tree, user_jsx_tree)
         
+        # Determine if either JSX tree has nodes
+        jsx_present = bool(original_jsx_tree and (original_jsx_tree.get('children') or original_jsx_tree.get('tag')) or
+                           user_jsx_tree and (user_jsx_tree.get('children') or user_jsx_tree.get('tag')))
+        
         # Create combined result
         self.last_result = TemplateComparison(
             html_similarity=html_result.similarity_score,
             jsx_similarity=jsx_result.similarity_score,
             html_details=html_result,
-            jsx_details=jsx_result
+            jsx_details=jsx_result,
+            jsx_present=jsx_present
         )
         
         return self.last_result
@@ -102,6 +111,34 @@ class ForensicAnalyzer:
         
         return report_text
     
+    def _generate_summary(self, result):
+        """Generate a human-readable summary string for a ComparisonResult."""
+        match = len(result.matching_elements)
+        diff = len(result.different_elements)
+        miss = len(result.missing_elements)
+        extra = len(result.extra_elements)
+        summary_parts = []
+        if match > 0 and diff == 0 and miss == 0 and extra == 0:
+            summary_parts.append("All elements match structurally.")
+        else:
+            if diff > 0:
+                summary_parts.append(f"{diff} elements differ (attributes or text)")
+            if miss > 0:
+                summary_parts.append(f"{miss} element(s) missing")
+            if extra > 0:
+                summary_parts.append(f"{extra} extra element(s)")
+            if match > 0:
+                summary_parts.append(f"{match} elements match structurally")
+        return "; ".join(summary_parts) if summary_parts else "No elements compared."
+
+    def _get_prediction(self, score):
+        if score >= 0.75:
+            return "High similarity — likely copied or derived"
+        elif score >= 0.40:
+            return "Moderate similarity — possible reuse or inspiration"
+        else:
+            return "Low similarity — likely independent"
+
     def export_results(self, output_path: Union[str, Path]) -> None:
         """Export analysis results to JSON."""
         if not self.last_result:
@@ -110,21 +147,28 @@ class ForensicAnalyzer:
         html = self.last_result.html_details
         jsx = self.last_result.jsx_details
         
+        html_summary = self._generate_summary(html)
+        jsx_summary = self._generate_summary(jsx) if jsx is not None else "No JSX comparison performed."
+        prediction = self._get_prediction(self.last_result.overall_similarity)
+        
         result_dict = {
             "overall_similarity": self.last_result.overall_similarity,
+            "prediction": prediction,
             "html_comparison": {
                 "similarity_score": self.last_result.html_similarity,
                 "matching_elements": len(html.matching_elements),
                 "different_elements": len(html.different_elements),
                 "missing_elements": len(html.missing_elements),
-                "extra_elements": len(html.extra_elements)
+                "extra_elements": len(html.extra_elements),
+                "summary": html_summary
             },
             "jsx_comparison": {
                 "similarity_score": self.last_result.jsx_similarity if jsx is not None else 0.0,
                 "matching_elements": len(jsx.matching_elements) if jsx is not None else 0,
                 "different_elements": len(jsx.different_elements) if jsx is not None else 0,
                 "missing_elements": len(jsx.missing_elements) if jsx is not None else 0,
-                "extra_elements": len(jsx.extra_elements) if jsx is not None else 0
+                "extra_elements": len(jsx.extra_elements) if jsx is not None else 0,
+                "summary": jsx_summary
             }
         }
         
@@ -147,7 +191,8 @@ class ForensicAnalyzer:
             html_similarity=html_result.similarity_score,
             jsx_similarity=0.0,  # No JSX comparison
             html_details=html_result,
-            jsx_details=None  # No JSX details
+            jsx_details=None,  # No JSX details
+            jsx_present=False  # JSX not present
         )
         
         return self.last_result

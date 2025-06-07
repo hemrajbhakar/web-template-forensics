@@ -53,6 +53,11 @@
             </form>
         </div>
 
+        <div id="predictionTab" class="hidden bg-white rounded-lg shadow-lg p-6 mb-8">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-2">Prediction</h2>
+            <p id="predictionMessage" class="text-lg text-blue-700 font-medium"></p>
+        </div>
+
         <div id="results" class="hidden space-y-8">
             <div class="bg-white rounded-lg shadow-lg p-6">
                 <h2 class="text-2xl font-semibold text-gray-800 mb-4">Analysis Results</h2>
@@ -177,6 +182,20 @@
         });
 
         function updateResults(data) {
+            // Show prediction tab and set message
+            document.getElementById('predictionTab').classList.remove('hidden');
+            const predictionMsg = document.getElementById('predictionMessage');
+            predictionMsg.textContent = data.prediction || '';
+            // Set color based on overall similarity
+            let colorClass = 'text-green-600';
+            const score = data.similarity_scores && typeof data.similarity_scores.overall === 'number' ? data.similarity_scores.overall : 0;
+            if (score >= 0.75) {
+                colorClass = 'text-red-600';
+            } else if (score >= 0.40) {
+                colorClass = 'text-yellow-600';
+            }
+            predictionMsg.classList.remove('text-red-600', 'text-yellow-600', 'text-green-600');
+            predictionMsg.classList.add(colorClass);
             // Update similarity scores
             updateScore('overall', data.similarity_scores.overall);
             updateScore('html', data.similarity_scores.html);

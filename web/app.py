@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+import json
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
@@ -96,11 +97,16 @@ def analyze():
             # Get summary and scores
             summary = analyzer.get_structure_summary()
             similarity_scores = analyzer.get_similarity_scores()
+            # Read prediction from report
+            with open(report_path, 'r', encoding='utf-8') as f:
+                report_data = json.load(f)
+            prediction = report_data.get('prediction', '')
             
             return jsonify({
                 'success': True,
                 'similarity_scores': similarity_scores,
                 'summary': summary,
+                'prediction': prediction,
                 'report_url': '/download/report'
             })
             
