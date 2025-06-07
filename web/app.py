@@ -31,69 +31,62 @@ def index():
 def analyze():
     """Handle file upload and analysis."""
     try:
-        # Check for original HTML file
-        if 'original_html_file' not in request.files:
-            return jsonify({'error': 'Original HTML template is required'}), 400
+        # Check for files
+        has_html = 'original_html_file' in request.files and 'user_html_file' in request.files and \
+                   request.files['original_html_file'].filename and request.files['user_html_file'].filename
+        has_jsx = 'original_jsx_file' in request.files and 'user_jsx_file' in request.files and \
+                  request.files['original_jsx_file'].filename and request.files['user_jsx_file'].filename
+
+        if not has_html and not has_jsx:
+            return jsonify({'error': 'At least one pair of HTML or JSX files is required'}), 400
+
+        # Prepare temp file paths
+        original_html_path = user_html_path = None
+        original_jsx_path = user_jsx_path = None
         
-        original_html = request.files['original_html_file']
-        if not original_html.filename:
-            return jsonify({'error': 'Original HTML template is required'}), 400
-            
-        # Check for user HTML file
-        if 'user_html_file' not in request.files:
-            return jsonify({'error': 'User HTML template is required'}), 400
-            
-        user_html = request.files['user_html_file']
-        if not user_html.filename:
-            return jsonify({'error': 'User HTML template is required'}), 400
-        
-        # Create temporary files with proper suffixes
-        with tempfile.NamedTemporaryFile(suffix='.html', delete=False, dir=TEMP_DIR) as orig_html_temp:
-            original_html.save(orig_html_temp)
-            original_html_path = Path(orig_html_temp.name)
-            
-        with tempfile.NamedTemporaryFile(suffix='.html', delete=False, dir=TEMP_DIR) as user_html_temp:
-            user_html.save(user_html_temp)
-            user_html_path = Path(user_html_temp.name)
-        
-        # Check for optional JSX files
-        has_jsx = False
-        original_jsx_path = None
-        user_jsx_path = None
-        
-        if 'original_jsx_file' in request.files and 'user_jsx_file' in request.files:
+        if has_html:
+            original_html = request.files['original_html_file']
+            user_html = request.files['user_html_file']
+            with tempfile.NamedTemporaryFile(suffix='.html', delete=False, dir=TEMP_DIR) as orig_html_temp:
+                original_html.save(orig_html_temp)
+                original_html_path = Path(orig_html_temp.name)
+            with tempfile.NamedTemporaryFile(suffix='.html', delete=False, dir=TEMP_DIR) as user_html_temp:
+                user_html.save(user_html_temp)
+                user_html_path = Path(user_html_temp.name)
+        if has_jsx:
             original_jsx = request.files['original_jsx_file']
             user_jsx = request.files['user_jsx_file']
-            
-            if original_jsx.filename and user_jsx.filename:
-                has_jsx = True
-                with tempfile.NamedTemporaryFile(suffix='.jsx', delete=False, dir=TEMP_DIR) as orig_jsx_temp:
-                    original_jsx.save(orig_jsx_temp)
-                    original_jsx_path = Path(orig_jsx_temp.name)
-                    
-                with tempfile.NamedTemporaryFile(suffix='.jsx', delete=False, dir=TEMP_DIR) as user_jsx_temp:
-                    user_jsx.save(user_jsx_temp)
-                    user_jsx_path = Path(user_jsx_temp.name)
-        
+            with tempfile.NamedTemporaryFile(suffix='.jsx', delete=False, dir=TEMP_DIR) as orig_jsx_temp:
+                original_jsx.save(orig_jsx_temp)
+                original_jsx_path = Path(orig_jsx_temp.name)
+            with tempfile.NamedTemporaryFile(suffix='.jsx', delete=False, dir=TEMP_DIR) as user_jsx_temp:
+                user_jsx.save(user_jsx_temp)
+                user_jsx_path = Path(user_jsx_temp.name)
+
         try:
-            # Analyze templates
-            if has_jsx:
+            # Analyze as appropriate
+            if has_html and has_jsx:
                 result = analyzer.analyze_templates(
                     original_html_path=original_html_path,
                     original_jsx_path=original_jsx_path,
                     user_html_path=user_html_path,
                     user_jsx_path=user_jsx_path
                 )
-            else:
+            elif has_html:
                 result = analyzer.analyze_html_only(
                     original_html_path=original_html_path,
                     user_html_path=user_html_path
                 )
-            
+            elif has_jsx:
+                result = analyzer.analyze_templates(
+                    original_html_path=None,
+                    original_jsx_path=original_jsx_path,
+                    user_html_path=None,
+                    user_jsx_path=user_jsx_path
+                )
             # Generate report
             report_path = TEMP_DIR / 'report.json'
             analyzer.export_results(report_path)
-            
             # Get summary and scores
             summary = analyzer.get_structure_summary()
             similarity_scores = analyzer.get_similarity_scores()
@@ -101,7 +94,6 @@ def analyze():
             with open(report_path, 'r', encoding='utf-8') as f:
                 report_data = json.load(f)
             prediction = report_data.get('prediction', '')
-            
             return jsonify({
                 'success': True,
                 'similarity_scores': similarity_scores,
@@ -109,15 +101,14 @@ def analyze():
                 'prediction': prediction,
                 'report_url': '/download/report'
             })
-            
         finally:
             # Cleanup temporary files
-            original_html_path.unlink(missing_ok=True)
-            user_html_path.unlink(missing_ok=True)
+            if has_html:
+                original_html_path.unlink(missing_ok=True)
+                user_html_path.unlink(missing_ok=True)
             if has_jsx:
                 original_jsx_path.unlink(missing_ok=True)
                 user_jsx_path.unlink(missing_ok=True)
-                
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

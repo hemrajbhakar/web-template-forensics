@@ -8,6 +8,8 @@ from pathlib import Path
 import json
 from .html_parser import HTMLParser
 from .structure_comparator import StructureComparator, ComparisonResult
+import subprocess
+import tempfile
 
 class TemplateComparison:
     def __init__(self, 
@@ -20,10 +22,15 @@ class TemplateComparison:
         self.jsx_similarity = jsx_similarity
         self.html_details = html_details
         self.jsx_details = jsx_details
-        if jsx_present:
+        # Determine which scores to use for overall_similarity
+        if html_similarity > 0 and jsx_similarity > 0:
             self.overall_similarity = (html_similarity + jsx_similarity) / 2
-        else:
+        elif html_similarity > 0:
             self.overall_similarity = html_similarity
+        elif jsx_similarity > 0:
+            self.overall_similarity = jsx_similarity
+        else:
+            self.overall_similarity = 0.0
 
 class ForensicAnalyzer:
     def __init__(self):
@@ -32,34 +39,31 @@ class ForensicAnalyzer:
         self.last_result: Optional[TemplateComparison] = None
         
     def analyze_templates(self,
-                        original_html_path: Union[str, Path],
-                        original_jsx_path: Union[str, Path],
-                        user_html_path: Union[str, Path],
-                        user_jsx_path: Union[str, Path]) -> TemplateComparison:
-        """Analyze and compare original and user templates."""
-        # Parse HTML templates
-        original_html_tree = self.html_parser.parse_file(original_html_path)
-        user_html_tree = self.html_parser.parse_file(user_html_path)
-        
-        # Parse JSX templates
-        with open(original_jsx_path, 'r', encoding='utf-8') as f:
-            original_jsx_content = f.read()
-        with open(user_jsx_path, 'r', encoding='utf-8') as f:
-            user_jsx_content = f.read()
-            
-        original_jsx_tree = self._parse_jsx(original_jsx_content)
-        user_jsx_tree = self._parse_jsx(user_jsx_content)
-        
-        # Compare HTML templates
-        html_result = self.comparator.compare_structures(original_html_tree, user_html_tree)
-        
-        # Compare JSX templates
-        jsx_result = self.comparator.compare_structures(original_jsx_tree, user_jsx_tree)
-        
+                        original_html_path: Union[str, Path, None],
+                        original_jsx_path: Union[str, Path, None],
+                        user_html_path: Union[str, Path, None],
+                        user_jsx_path: Union[str, Path, None]) -> TemplateComparison:
+        """Analyze and compare original and user templates (HTML and/or JSX)."""
+        # Parse HTML templates if paths are provided
+        if original_html_path is not None and user_html_path is not None:
+            original_html_tree = self.html_parser.parse_file(original_html_path)
+            user_html_tree = self.html_parser.parse_file(user_html_path)
+            html_result = self.comparator.compare_structures(original_html_tree, user_html_tree)
+        else:
+            html_result = ComparisonResult()  # empty/default result
+        # Parse JSX templates if paths are provided
+        if original_jsx_path is not None and user_jsx_path is not None:
+            with open(original_jsx_path, 'r', encoding='utf-8') as f:
+                original_jsx_content = f.read()
+            with open(user_jsx_path, 'r', encoding='utf-8') as f:
+                user_jsx_content = f.read()
+            original_jsx_tree = self._parse_jsx(original_jsx_content)
+            user_jsx_tree = self._parse_jsx(user_jsx_content)
+            jsx_result = self.comparator.compare_structures(original_jsx_tree, user_jsx_tree)
+        else:
+            jsx_result = ComparisonResult()  # empty/default result
         # Determine if either JSX tree has nodes
-        jsx_present = bool(original_jsx_tree and (original_jsx_tree.get('children') or original_jsx_tree.get('tag')) or
-                           user_jsx_tree and (user_jsx_tree.get('children') or user_jsx_tree.get('tag')))
-        
+        jsx_present = (original_jsx_path is not None and user_jsx_path is not None)
         # Create combined result
         self.last_result = TemplateComparison(
             html_similarity=html_result.similarity_score,
@@ -68,21 +72,30 @@ class ForensicAnalyzer:
             jsx_details=jsx_result,
             jsx_present=jsx_present
         )
-        
         return self.last_result
     
     def _parse_jsx(self, content: str) -> Dict:
-        """Parse JSX content using our Tree-sitter based parser."""
-        # This will be implemented to use our JSX parser
-        # For now, return a simple structure
-        return {
-            "type": "jsx_element",
-            "openingElement": {
-                "name": {"name": "div"},
-                "attributes": []
-            },
-            "children": []
-        }
+        """Parse JSX content using the Node.js tree-sitter parser (jsx_parser.js)."""
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.jsx', delete=False, mode='w', encoding='utf-8') as jsx_file:
+                jsx_file.write(content)
+                jsx_file_path = jsx_file.name
+            with tempfile.NamedTemporaryFile(suffix='.json', delete=False, mode='r+', encoding='utf-8') as ast_file:
+                ast_file_path = ast_file.name
+            # Call the Node.js parser
+            result = subprocess.run([
+                'node', 'jsx_parser.js', jsx_file_path, ast_file_path
+            ], capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"JSX parser error: {result.stderr}")
+                return {}
+            # Read the AST JSON
+            with open(ast_file_path, 'r', encoding='utf-8') as f:
+                ast = json.load(f)
+            return ast
+        except Exception as e:
+            print(f"Error running Node.js JSX parser: {e}")
+            return {}
     
     def generate_report(self, output_path: Optional[Union[str, Path]] = None) -> str:
         """Generate a detailed analysis report."""
