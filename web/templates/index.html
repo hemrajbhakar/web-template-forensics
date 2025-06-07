@@ -29,6 +29,11 @@
                             <input type="file" name="original_jsx_file" accept=".jsx,.tsx"
                                 class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
                         </div>
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700">CSS File</label>
+                            <input type="file" name="original_css_file" accept=".css"
+                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                        </div>
                     </div>
                     <div class="space-y-4">
                         <h2 class="text-xl font-semibold text-gray-800">User Templates</h2>
@@ -40,6 +45,11 @@
                         <div class="space-y-2">
                             <label class="block text-sm font-medium text-gray-700">JSX/TSX Template</label>
                             <input type="file" name="user_jsx_file" accept=".jsx,.tsx"
+                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                        </div>
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700">CSS File</label>
+                            <input type="file" name="user_css_file" accept=".css"
                                 class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
                         </div>
                     </div>
@@ -107,10 +117,25 @@
                             </div>
                         </div>
                     </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-700 mb-4">CSS Similarity</h3>
+                        <div class="relative pt-1">
+                            <div class="flex mb-2 items-center justify-between">
+                                <div>
+                                    <span id="cssScore" class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-pink-600 bg-pink-200">
+                                        0%
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-pink-200">
+                                <div id="cssBar" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-pink-500" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div class="bg-white rounded-lg shadow-lg p-6">
                     <h3 class="text-xl font-semibold text-gray-800 mb-4">HTML Comparison</h3>
                     <canvas id="htmlChart"></canvas>
@@ -118,6 +143,10 @@
                 <div class="bg-white rounded-lg shadow-lg p-6">
                     <h3 class="text-xl font-semibold text-gray-800 mb-4">JSX/TSX Comparison</h3>
                     <canvas id="jsxChart"></canvas>
+                </div>
+                <div class="bg-white rounded-lg shadow-lg p-6">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">CSS Comparison</h3>
+                    <canvas id="cssChart"></canvas>
                 </div>
             </div>
 
@@ -200,12 +229,16 @@
             updateScore('overall', data.similarity_scores.overall);
             updateScore('html', data.similarity_scores.html);
             updateScore('jsx', data.similarity_scores.jsx);
+            updateScore('css', data.similarity_scores.css);
             
             // Update HTML chart
             updateChart('htmlChart', data.summary.html, 'HTML Elements');
             
             // Update JSX chart
             updateChart('jsxChart', data.summary.jsx, 'JSX Elements');
+            
+            // Update CSS chart
+            updateChart('cssChart', data.summary.css, 'CSS Selectors');
             
             // Update summary
             const summary = document.getElementById('reportSummary');
@@ -220,17 +253,28 @@
         
         function updateChart(canvasId, data, label) {
             const ctx = document.getElementById(canvasId).getContext('2d');
+            let chartData;
+            if (canvasId === 'cssChart') {
+                chartData = [
+                    data.matching_selectors,
+                    data.different_selectors,
+                    data.missing_selectors,
+                    data.extra_selectors
+                ];
+            } else {
+                chartData = [
+                    data.matching_elements,
+                    data.different_elements,
+                    data.missing_elements,
+                    data.extra_elements
+                ];
+            }
             new Chart(ctx, {
                 type: 'doughnut',
                 data: {
                     labels: ['Matching', 'Different', 'Missing', 'Extra'],
                     datasets: [{
-                        data: [
-                            data.matching_elements,
-                            data.different_elements,
-                            data.missing_elements,
-                            data.extra_elements
-                        ],
+                        data: chartData,
                         backgroundColor: [
                             '#10B981', // green
                             '#F59E0B', // yellow
@@ -256,7 +300,7 @@
         
         function generateSummaryHTML(summary) {
             return `
-                <div class="grid grid-cols-2 gap-8">
+                <div class="grid grid-cols-3 gap-8">
                     <div class="space-y-4">
                         <h3 class="text-lg font-medium text-gray-900">HTML Comparison</h3>
                         <div class="grid grid-cols-2 gap-4">
@@ -296,6 +340,27 @@
                             <div class="p-4 bg-red-50 rounded-lg">
                                 <h4 class="font-medium text-red-700">Missing/Extra</h4>
                                 <p class="text-2xl font-bold text-red-900">${summary.jsx.missing_elements + summary.jsx.extra_elements}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="space-y-4">
+                        <h3 class="text-lg font-medium text-gray-900">CSS Comparison</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="p-4 bg-gray-50 rounded-lg">
+                                <h4 class="font-medium text-gray-700">Total Selectors</h4>
+                                <p class="text-2xl font-bold text-gray-900">${summary.css.total_selectors}</p>
+                            </div>
+                            <div class="p-4 bg-green-50 rounded-lg">
+                                <h4 class="font-medium text-green-700">Matching</h4>
+                                <p class="text-2xl font-bold text-green-900">${summary.css.matching_selectors}</p>
+                            </div>
+                            <div class="p-4 bg-yellow-50 rounded-lg">
+                                <h4 class="font-medium text-yellow-700">Different</h4>
+                                <p class="text-2xl font-bold text-yellow-900">${summary.css.different_selectors}</p>
+                            </div>
+                            <div class="p-4 bg-red-50 rounded-lg">
+                                <h4 class="font-medium text-red-700">Missing/Extra</h4>
+                                <p class="text-2xl font-bold text-red-900">${summary.css.missing_selectors + summary.css.extra_selectors}</p>
                             </div>
                         </div>
                     </div>
