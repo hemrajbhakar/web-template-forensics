@@ -33,7 +33,8 @@ class UIFrameworkAnalyzer:
             config_results = []
             for pair in config_pairs:
                 if pair['type'] == name:
-                    config_results.append(analyzer.compare_configs(pair['original_path'], pair['user_path']))
+                    cfg_result = analyzer.compare_configs(pair['original_path'], pair['user_path'])
+                    config_results.append(cfg_result)
             results[name] = {
                 'class_results': class_results,
                 'config_results': config_results

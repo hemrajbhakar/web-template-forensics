@@ -26,6 +26,57 @@ analyzer = ForensicAnalyzer()
 TEMP_DIR = Path(tempfile.gettempdir()) / 'template_analyzer'
 TEMP_DIR.mkdir(exist_ok=True)
 
+def aggregate_html_summary(pairs):
+    total = matching = different = missing = extra = 0
+    for pair in pairs:
+        summary = pair.get('details', {}).get('summary', {}).get('html', {})
+        total += summary.get('total_elements', 0)
+        matching += summary.get('matching_elements', 0)
+        different += summary.get('different_elements', 0)
+        missing += summary.get('missing_elements', 0)
+        extra += summary.get('extra_elements', 0)
+    return {
+        'total_elements': total,
+        'matching_elements': matching,
+        'different_elements': different,
+        'missing_elements': missing,
+        'extra_elements': extra
+    }
+
+def aggregate_jsx_summary(pairs):
+    total = matching = different = missing = extra = 0
+    for pair in pairs:
+        summary = pair.get('details', {}).get('summary', {}).get('jsx', {})
+        total += summary.get('total_elements', 0)
+        matching += summary.get('matching_elements', 0)
+        different += summary.get('different_elements', 0)
+        missing += summary.get('missing_elements', 0)
+        extra += summary.get('extra_elements', 0)
+    return {
+        'total_elements': total,
+        'matching_elements': matching,
+        'different_elements': different,
+        'missing_elements': missing,
+        'extra_elements': extra
+    }
+
+def aggregate_css_summary(pairs):
+    total = matching = different = missing = extra = 0
+    for pair in pairs:
+        details = pair.get('details', {})
+        matching += details.get('matching_selectors', 0)
+        different += details.get('different_selectors', 0)
+        missing += details.get('missing_selectors', 0)
+        extra += details.get('extra_selectors', 0)
+    total = matching + different + missing + extra
+    return {
+        'total_selectors': total,
+        'matching_selectors': matching,
+        'different_selectors': different,
+        'missing_selectors': missing,
+        'extra_selectors': extra
+    }
+
 @app.route('/')
 def index():
     """Render the main page."""
@@ -235,9 +286,12 @@ def analyze_zip():
         # Find Tailwind config files in both directories
         orig_config_files = glob.glob(os.path.join(orig_dir, '**', 'tailwind.config.js'), recursive=True)
         mod_config_files = glob.glob(os.path.join(mod_dir, '**', 'tailwind.config.js'), recursive=True)
+        print("[DEBUG] Original config files found:", orig_config_files)
+        print("[DEBUG] Modified config files found:", mod_config_files)
         config_pairs = []
         for orig_cfg in orig_config_files:
             for mod_cfg in mod_config_files:
+                print(f"[DEBUG] Calling compare_configs for: {orig_cfg} and {mod_cfg}")
                 config_pairs.append({
                     'type': 'tailwind',
                     'original_path': orig_cfg,
@@ -245,122 +299,19 @@ def analyze_zip():
                 })
         # Run matcher
         results = match_and_compare_all(orig_dir, mod_dir)
-        # Tailwind analysis
-        ui_analyzer = UIFrameworkAnalyzer()
-        # Collect all HTML/JSX/TSX file pairs for Tailwind class analysis
-        file_pairs = []
-        for pair in results.get('html', {}).get('matched_pairs', []):
-            orig_path = os.path.join(orig_dir, pair['original'])
-            user_path = os.path.join(mod_dir, pair['modified'])
-            with open(orig_path, 'r', encoding='utf-8') as f:
-                orig_content = f.read()
-            with open(user_path, 'r', encoding='utf-8') as f:
-                user_content = f.read()
-            file_pairs.append({'type': 'tailwind', 'original_content': orig_content, 'user_content': user_content, 'filetype': 'html'})
-        for pair in results.get('jsx', {}).get('matched_pairs', []):
-            orig_path = os.path.join(orig_dir, pair['original'])
-            user_path = os.path.join(mod_dir, pair['modified'])
-            with open(orig_path, 'r', encoding='utf-8') as f:
-                orig_content = f.read()
-            with open(user_path, 'r', encoding='utf-8') as f:
-                user_content = f.read()
-            file_pairs.append({'type': 'tailwind', 'original_content': orig_content, 'user_content': user_content, 'filetype': 'jsx'})
-        tw_results = ui_analyzer.analyze_all(file_pairs, config_pairs)
-        # Aggregate Tailwind class and config similarity
-        tailwind = tw_results.get('tailwind', {})
-        class_similarities = [r.get('jaccard_similarity', 0.0) for r in tailwind.get('class_results', [])]
-        config_similarities = [r.get('key_jaccard_similarity', 0.0) for r in tailwind.get('config_results', [])]
-        class_similarity = sum(class_similarities) / len(class_similarities) if class_similarities else 0.0
-        config_similarity = sum(config_similarities) / len(config_similarities) if config_similarities else 0.0
-        # For summary, use the first result (or empty)
-        class_result = tailwind.get('class_results', [{}])[0] if tailwind.get('class_results') else {}
-        config_result = tailwind.get('config_results', [{}])[0] if tailwind.get('config_results') else {}
-        print('[DEBUG] config_result:', config_result)
-        # Use correct keys from backend results
-        results['tailwind'] = {
-            'class_similarity': class_similarity,
-            'config_similarity': config_result.get('improved_config_similarity', config_similarity),
-            'shared_classes': class_result.get('shared_classes', []),
-            'only_in_original': class_result.get('only_in_original', []),
-            'only_in_user': class_result.get('only_in_user', []),
-            'shared_config_keys': config_result.get('shared_config_keys', []),
-            'only_in_original_config': config_result.get('only_in_original_config', []),
-            'only_in_user_config': config_result.get('only_in_user_config', []),
-            'shared_config_values': config_result.get('shared_config_values', {}),
-        }
-        # Aggregate summary for all matched pairs (robust version)
-        def aggregate_html_summary(pairs):
-            total = matching = different = missing = extra = 0
-            for pair in pairs:
-                summary = pair.get('details', {}).get('summary', {}).get('html', {})
-                total += summary.get('total_elements', 0)
-                matching += summary.get('matching_elements', 0)
-                different += summary.get('different_elements', 0)
-                missing += summary.get('missing_elements', 0)
-                extra += summary.get('extra_elements', 0)
-            return {
-                'total_elements': total,
-                'matching_elements': matching,
-                'different_elements': different,
-                'missing_elements': missing,
-                'extra_elements': extra
-            }
-
-        def aggregate_jsx_summary(pairs):
-            total = matching = different = missing = extra = 0
-            for pair in pairs:
-                summary = pair.get('details', {}).get('summary', {}).get('jsx', {})
-                total += summary.get('total_elements', 0)
-                matching += summary.get('matching_elements', 0)
-                different += summary.get('different_elements', 0)
-                missing += summary.get('missing_elements', 0)
-                extra += summary.get('extra_elements', 0)
-            return {
-                'total_elements': total,
-                'matching_elements': matching,
-                'different_elements': different,
-                'missing_elements': missing,
-                'extra_elements': extra
-            }
-
-        def aggregate_css_summary(pairs):
-            total = matching = different = missing = extra = 0
-            for pair in pairs:
-                details = pair.get('details', {})
-                matching += details.get('matching_selectors', 0)
-                different += details.get('different_selectors', 0)
-                missing += details.get('missing_selectors', 0)
-                extra += details.get('extra_selectors', 0)
-            total = matching + different + missing + extra
-            return {
-                'total_selectors': total,
-                'matching_selectors': matching,
-                'different_selectors': different,
-                'missing_selectors': missing,
-                'extra_selectors': extra
-            }
-
+        # Update summary['tailwind'] to use the robust structure
+        tailwind = results.get('tailwind', {})
         results['summary'] = {
             'html': aggregate_html_summary(results.get('html', {}).get('matched_pairs', [])),
             'jsx': aggregate_jsx_summary(results.get('jsx', {}).get('matched_pairs', [])),
             'css': aggregate_css_summary(results.get('css', {}).get('matched_pairs', [])),
-            'tailwind': {
-                'class_similarity': class_similarity,
-                'config_similarity': config_result.get('improved_config_similarity', config_similarity),
-                'shared_classes': class_result.get('shared_classes', []),
-                'only_in_original': class_result.get('only_in_original', []),
-                'only_in_user': class_result.get('only_in_user', []),
-                'shared_config_keys': config_result.get('shared_config_keys', []),
-                'only_in_original_config': config_result.get('only_in_original_config', []),
-                'only_in_user_config': config_result.get('only_in_user_config', []),
-                'shared_config_values': config_result.get('shared_config_values', {}),
-            }
+            'tailwind': tailwind  # Use the full robust tailwind result
         }
         # Add compatibility field for frontend
         html_score = results.get('html', {}).get('aggregate_score', 0.0)
         css_score = results.get('css', {}).get('aggregate_score', 0.0)
         jsx_score = results.get('jsx', {}).get('aggregate_score', 0.0)
-        tailwind_score = class_similarity
+        tailwind_score = tailwind.get('class_similarity', 0.0)
         # Determine which categories are present (at least one file in either folder)
         present = {}
         base_weights = {'html': 0.4, 'css': 0.2, 'jsx': 0.2, 'tailwind': 0.2}
@@ -371,10 +322,10 @@ def analyze_zip():
         if results.get('jsx', {}).get('matched_pairs') or results.get('jsx', {}).get('unmatched_original') or results.get('jsx', {}).get('unmatched_modified'):
             present['jsx'] = jsx_score
         # For tailwind, check if any class_results or config_results exist
-        if (results.get('tailwind', {}).get('class_similarity', 0.0) > 0 or
-            results.get('tailwind', {}).get('config_similarity', 0.0) > 0 or
-            results.get('tailwind', {}).get('shared_classes') or
-            results.get('tailwind', {}).get('shared_config_keys')):
+        if (tailwind.get('class_similarity', 0.0) > 0 or
+            tailwind.get('config_similarity', 0.0) > 0 or
+            tailwind.get('shared_classes') or
+            tailwind.get('shared_config_keys')):
             present['tailwind'] = tailwind_score
         # Normalize weights
         present_weights = {k: base_weights[k] for k in present}
@@ -390,12 +341,51 @@ def analyze_zip():
             'css': css_score,
             'tailwind': tailwind_score
         }
+        # Ensure both similarity and similarity_scores['overall'] use the file-count-based value
+        results['similarity_scores']['overall'] = results.get('overall_similarity', 0.0)
         # Optionally, save report for download
         report_path = TEMP_DIR / 'report.json'
         with open(report_path, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2)
         results['report_url'] = '/download/report'
-        return jsonify(results)
+        # Prepare compact frontend response
+        compact_results = {
+            'similarity': results.get('overall_similarity', 0.0),
+            'similarity_scores': results.get('similarity_scores', {}),
+            'summary': {
+                'html': results['summary'].get('html', {}),
+                'jsx': results['summary'].get('jsx', {}),
+                'css': results['summary'].get('css', {}),
+                'tailwind': {
+                    'class_similarity': tailwind.get('class_similarity', 0.0),
+                    'config_similarity': tailwind.get('config_similarity', 0.0),
+                    'shared_classes': tailwind.get('shared_classes', []),
+                    'only_in_original': tailwind.get('only_in_original', []),
+                    'only_in_user': tailwind.get('only_in_user', []),
+                    'shared_config_keys': tailwind.get('shared_config_keys', []),
+                    'only_in_original_config': tailwind.get('only_in_original_config', []),
+                    'only_in_user_config': tailwind.get('only_in_user_config', []),
+                    'shared_config_values': tailwind.get('shared_config_values', {})
+                }
+            },
+            'file_matches': {
+                'html': results.get('html', {}).get('matched_pairs', []),
+                'css': results.get('css', {}).get('matched_pairs', []),
+                'jsx': results.get('jsx', {}).get('matched_pairs', []),
+                'tailwind': tailwind.get('per_file_results', []),
+                'unmatched': {
+                    'html': results.get('html', {}).get('unmatched_files', {}),
+                    'css': results.get('css', {}).get('unmatched_files', {}),
+                    'jsx': results.get('jsx', {}).get('unmatched_files', {})
+                }
+            },
+            'prediction': results.get('prediction', ''),
+            'report_url': results.get('report_url', '')
+        }
+        # Save compact report for download
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(compact_results, f, indent=2)
+        return jsonify(compact_results)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

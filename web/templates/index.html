@@ -14,7 +14,7 @@
             <p class="text-gray-600">Compare original and user templates to identify similarities and differences</p>
         </header>
 
-        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+        <div class="bg-white rounded-lg border border-gray-300 p-6 mb-8">
             <form id="uploadForm" class="space-y-6" enctype="multipart/form-data">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div class="space-y-4">
@@ -44,13 +44,13 @@
             </form>
         </div>
 
-        <div id="predictionTab" class="hidden bg-white rounded-lg shadow-lg p-6 mb-8">
+        <div id="predictionTab" class="hidden bg-white rounded-lg border border-gray-300 p-6 mb-8">
             <h2 class="text-2xl font-semibold text-gray-800 mb-2">Prediction</h2>
             <p id="predictionMessage" class="text-lg text-blue-700 font-medium"></p>
         </div>
 
         <div id="results" class="hidden space-y-8">
-            <div class="bg-white rounded-lg shadow-lg p-6">
+            <div class="bg-white rounded-lg border border-gray-300 p-6">
                 <h2 class="text-2xl font-semibold text-gray-800 mb-4">Analysis Results</h2>
                 <div class="grid grid-cols-1 md:grid-cols-5 gap-6">
                     <div>
@@ -147,21 +147,21 @@
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="bg-white rounded-lg shadow-lg p-6">
+                <div class="bg-white rounded-lg border border-gray-300 p-6">
                     <h3 class="text-xl font-semibold text-gray-800 mb-4">HTML Comparison</h3>
                     <canvas id="htmlChart"></canvas>
                 </div>
-                <div class="bg-white rounded-lg shadow-lg p-6">
+                <div class="bg-white rounded-lg border border-gray-300 p-6">
                     <h3 class="text-xl font-semibold text-gray-800 mb-4">JSX/TSX Comparison</h3>
                     <canvas id="jsxChart"></canvas>
                 </div>
-                <div class="bg-white rounded-lg shadow-lg p-6">
+                <div class="bg-white rounded-lg border border-gray-300 p-6">
                     <h3 class="text-xl font-semibold text-gray-800 mb-4">CSS Comparison</h3>
                     <canvas id="cssChart"></canvas>
                 </div>
             </div>
 
-            <div class="bg-white rounded-lg shadow-lg p-6">
+            <div class="bg-white rounded-lg border border-gray-300 p-6">
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-2xl font-semibold text-gray-800">Detailed Report</h2>
                     <a id="downloadReport" href="#" 
@@ -172,6 +172,11 @@
                 <div id="reportSummary" class="prose max-w-none">
                     <!-- Report content will be inserted here -->
                 </div>
+            </div>
+
+            <div class="bg-white rounded-lg border border-gray-300 p-6 mt-8">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-4">Per-File/Component Matches</h2>
+                <div id="fileMatchTables"></div>
             </div>
         </div>
 
@@ -269,8 +274,8 @@
             summary.innerHTML = generateSummaryHTML(data.summary);
 
             // Tailwind class/config similarity
-            if (data.tailwind) {
-                const tw = data.tailwind;
+            const tw = data.summary?.tailwind;
+            if (tw) {
                 // Class similarity
                 const classScore = Math.round((tw.class_similarity || 0) * 100);
                 document.getElementById('tailwindClassScore').textContent = `${classScore}%`;
@@ -280,6 +285,8 @@
                 document.getElementById('tailwindConfigScore').textContent = `${configScore}%`;
                 document.getElementById('tailwindConfigBar').style.width = `${configScore}%`;
             }
+            // Render per-file/component match tables
+            renderFileMatchTables(data.file_matches || {});
         }
         
         function updateScore(type, score) {
@@ -458,6 +465,60 @@
             }
 
             return html;
+        }
+
+        function renderFileMatchTable(matches, unmatched, section) {
+            let html = `
+                <h3 class="text-lg font-semibold mt-6 mb-2">${section.toUpperCase()} Matches</h3>
+                <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 rounded-lg shadow-sm border border-gray-200 bg-white mb-4">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th class="px-4 py-2 text-left font-semibold text-gray-700">Original File</th>
+                            <th class="px-4 py-2 text-left font-semibold text-gray-700">Matched File</th>
+                            <th class="px-4 py-2 text-left font-semibold text-gray-700">Similarity</th>
+                            <th class="px-4 py-2 text-left font-semibold text-gray-700">Match Type</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+            `;
+            if (!matches || matches.length === 0) {
+                html += `<tr><td colspan="4" class="px-4 py-2 text-gray-500 text-center">No matches found.</td></tr>`;
+            } else {
+                for (const [i, m] of matches.entries()) {
+                    html += `
+                        <tr class="${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-blue-50 transition">
+                            <td class="px-4 py-2">${m.original || (m.file_pair && m.file_pair.original) || ''}</td>
+                            <td class="px-4 py-2">${m.modified || (m.file_pair && m.file_pair.modified) || ''}</td>
+                            <td class="px-4 py-2">${(m.similarity !== undefined ? (m.similarity * 100).toFixed(1) : '')}%</td>
+                            <td class="px-4 py-2 capitalize">${m.match_type || ''}</td>
+                        </tr>
+                    `;
+                }
+            }
+            html += `
+                    </tbody>
+                </table>
+                </div>
+            `;
+
+            // Unmatched files
+            if (unmatched && (unmatched.original?.length > 0 || unmatched.modified?.length > 0)) {
+                html += `<div class="text-gray-700 mb-2">Unmatched Files:</div><ul class="list-disc ml-6 mb-4">`;
+                for (const f of unmatched.original || []) html += `<li>Original: ${f}</li>`;
+                for (const f of unmatched.modified || []) html += `<li>Modified: ${f}</li>`;
+                html += `</ul>`;
+            }
+            return html;
+        }
+
+        function renderFileMatchTables(fileMatches) {
+            let tablesHtml = '';
+            tablesHtml += renderFileMatchTable(fileMatches.html || [], fileMatches.unmatched?.html || {original:[],modified:[]}, 'HTML');
+            tablesHtml += renderFileMatchTable(fileMatches.jsx || [], fileMatches.unmatched?.jsx || {original:[],modified:[]}, 'JSX/TSX');
+            tablesHtml += renderFileMatchTable(fileMatches.css || [], fileMatches.unmatched?.css || {original:[],modified:[]}, 'CSS');
+            tablesHtml += renderFileMatchTable(fileMatches.tailwind || [], null, 'Tailwind Classes');
+            document.getElementById('fileMatchTables').innerHTML = tablesHtml;
         }
     </script>
 </body>

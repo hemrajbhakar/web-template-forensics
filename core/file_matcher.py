@@ -4,12 +4,14 @@ import tempfile
 from collections import defaultdict, Counter
 from typing import List, Dict, Tuple
 import difflib
+import signal
+import numpy as np
 # --- New imports for structure matching ---
 from .html_parser import HTMLParser
-from .jsx_parser import JSXParser
 from .structure_comparator import StructureComparator
 from .css_style_checker import CSSStyleChecker
 from .tailwind_analyzer import TailwindAnalyzer
+from .jsx_treesitter_parser import parse_jsx_with_treesitter
 
 # --- Step 1: Unzip & list files ---
 def unzip_to_tempdir(zip_path: str) -> str:
@@ -20,7 +22,7 @@ def unzip_to_tempdir(zip_path: str) -> str:
     return temp_dir
 
 def list_files_by_type(root_dir: str) -> Dict[str, List[str]]:
-    """Recursively list files by type (html, css, jsx/tsx) with relative paths from root_dir."""
+    """Recursively list files by type (html, css, jsx/tsx) with relative paths from root_dir. Skip all other file types."""
     file_types = defaultdict(list)
     for dirpath, _, filenames in os.walk(root_dir):
         for fname in filenames:
@@ -32,6 +34,9 @@ def list_files_by_type(root_dir: str) -> Dict[str, List[str]]:
                 file_types['css'].append(rel_path)
             elif ext in ('.jsx', '.tsx'):
                 file_types['jsx'].append(rel_path)
+            elif fname == 'tailwind.config.js':
+                file_types['tailwind_config'].append(rel_path)
+            # Skip all other files
     return dict(file_types)
 
 # --- Step 2: Exact path-based match ---
@@ -142,29 +147,6 @@ def structure_match_html(unmatched1: List[str], unmatched2: List[str], dir1: str
             used2.add(best_f2)
     return matches
 
-def structure_match_jsx(unmatched1: List[str], unmatched2: List[str], dir1: str, dir2: str, threshold: float = 0.5) -> List[Tuple[str, str, float]]:
-    """Structure-based matching for JSX/TSX files using StructureComparator."""
-    parser = JSXParser()
-    comparator = StructureComparator()
-    matches = []
-    used2 = set()
-    for f1 in unmatched1:
-        best_score = 0
-        best_f2 = None
-        tree1 = parser.parse_jsx_file(os.path.join(dir1, f1))
-        for f2 in unmatched2:
-            if f2 in used2:
-                continue
-            tree2 = parser.parse_jsx_file(os.path.join(dir2, f2))
-            score = comparator.compare_structures(tree1, tree2).similarity_score
-            if score > best_score:
-                best_score = score
-                best_f2 = f2
-        if best_score >= threshold and best_f2:
-            matches.append((f1, best_f2, best_score))
-            used2.add(best_f2)
-    return matches
-
 def structure_match_css(unmatched1: List[str], unmatched2: List[str], dir1: str, dir2: str, threshold: float = 0.5) -> List[Tuple[str, str, float]]:
     """Structure-based matching for CSS files using CSSStyleChecker."""
     checker = CSSStyleChecker()
@@ -181,6 +163,28 @@ def structure_match_css(unmatched1: List[str], unmatched2: List[str], dir1: str,
             with open(os.path.join(dir2, f2), 'r', encoding='utf-8') as f:
                 css2 = f.read()
             score = checker.compare_css(css1, css2)["css_similarity"]
+            if score > best_score:
+                best_score = score
+                best_f2 = f2
+        if best_score >= threshold and best_f2:
+            matches.append((f1, best_f2, best_score))
+            used2.add(best_f2)
+    return matches
+
+def structure_match_jsx(unmatched1: List[str], unmatched2: List[str], dir1: str, dir2: str, threshold: float = 0.5) -> List[Tuple[str, str, float]]:
+    """Structure-based matching for JSX/TSX files using StructureComparator and Node.js tree-sitter parser."""
+    comparator = StructureComparator()
+    matches = []
+    used2 = set()
+    for f1 in unmatched1:
+        best_score = 0
+        best_f2 = None
+        tree1 = parse_jsx_with_treesitter(os.path.join(dir1, f1))
+        for f2 in unmatched2:
+            if f2 in used2:
+                continue
+            tree2 = parse_jsx_with_treesitter(os.path.join(dir2, f2))
+            score = comparator.compare_structures(tree1, tree2).similarity_score
             if score > best_score:
                 best_score = score
                 best_f2 = f2
@@ -274,9 +278,12 @@ def content_match_css(unmatched1: List[str], unmatched2: List[str], dir1: str, d
             used2.add(best_f2)
     return matches
 
+def handler(signum, frame):
+    raise TimeoutError("Timed out during file comparison!")
+
 # --- Main orchestrator for full matching and comparison workflow ---
 def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
-    """Run the full matching and comparison workflow for HTML, CSS, and JSX/TSX files."""
+    print('--- [LOG] Starting match_and_compare_all ---')
     file_types = ['html', 'css', 'jsx']
     results = {}
     total_files_compared = Counter()
@@ -289,9 +296,11 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
     tailwind_results = []
     tailwind_scores = []
     tailwind_analyzer = TailwindAnalyzer()
+    print('--- [LOG] Starting file matching ---')
     for filetype in file_types:
         files1 = list_files_by_type(original_dir).get(filetype, [])
         files2 = list_files_by_type(modified_dir).get(filetype, [])
+        print(f'--- [LOG] {filetype}: {len(files1)} original, {len(files2)} modified files ---')
         # Step 2: Exact match
         exact, rem1, rem2 = exact_path_match(files1, files2)
         # Step 3: Fuzzy match
@@ -303,12 +312,12 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
         # Step 5.5: Content similarity match for CSS only
         content_matches = []
         if filetype == 'css':
-            # Remove already matched files from rem1/rem2
             matched1 = set([m[0] for m in structure + contextual])
             matched2 = set([m[1] for m in structure + contextual])
             unmatched1 = [f for f in rem1 if f not in matched1]
             unmatched2 = [f for f in rem2 if f not in matched2]
             content_matches = content_match_css(unmatched1, unmatched2, original_dir, modified_dir)
+        print(f'--- [LOG] {filetype}: file matching done ---')
         # Step 6: Output matched pairs
         matched_pairs = output_matched_pairs_json(exact, fuzzy, structure, contextual, filetype)
         if filetype == 'css' and content_matches:
@@ -319,12 +328,11 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
                     'score': round(score, 2),
                     'match_type': 'content'
                 })
-        # Unmatched files
         matched_originals = set([m['original'] for m in matched_pairs])
         matched_modifieds = set([m['modified'] for m in matched_pairs])
         unmatched_files[filetype]['original'] = [f for f in files1 if f not in matched_originals]
         unmatched_files[filetype]['modified'] = [f for f in files2 if f not in matched_modifieds]
-        # Step 7: Pairwise comparison
+        print(f'--- [LOG] {filetype}: starting pairwise comparison ---')
         checker = None
         for pair in matched_pairs:
             if filetype == 'html':
@@ -334,17 +342,6 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
                 mod_path = os.path.join(modified_dir, pair['modified'])
                 tree1 = parser.parse_file(orig_path)
                 tree2 = parser.parse_file(mod_path)
-                comp_result = comparator.compare_structures(tree1, tree2)
-                pair['similarity'] = round(comp_result.similarity_score, 2)
-                pair['details'] = comp_result.to_dict()
-                all_scores.append(comp_result.similarity_score)
-            elif filetype == 'jsx':
-                parser = JSXParser()
-                comparator = StructureComparator()
-                orig_path = os.path.join(original_dir, pair['original'])
-                mod_path = os.path.join(modified_dir, pair['modified'])
-                tree1 = parser.parse_jsx_file(orig_path)
-                tree2 = parser.parse_jsx_file(mod_path)
                 comp_result = comparator.compare_structures(tree1, tree2)
                 pair['similarity'] = round(comp_result.similarity_score, 2)
                 pair['details'] = comp_result.to_dict()
@@ -361,6 +358,24 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
                 pair['similarity'] = comp_result['css_similarity']
                 pair['details'] = comp_result
                 all_scores.append(comp_result['css_similarity'])
+            elif filetype == 'jsx':
+                print(f'--- [LOG] JSX: Starting comparison for {pair["original"]} and {pair["modified"]} ---')
+                comparator = StructureComparator()
+                orig_path = os.path.join(original_dir, pair['original'])
+                mod_path = os.path.join(modified_dir, pair['modified'])
+                print(f'--- [LOG] JSX: Parsing original {orig_path} ---')
+                tree1 = parse_jsx_with_treesitter(orig_path)
+                print(f'--- [LOG] JSX: Finished parsing original {orig_path} ---')
+                print(f'--- [LOG] JSX: Parsing modified {mod_path} ---')
+                tree2 = parse_jsx_with_treesitter(mod_path)
+                print(f'--- [LOG] JSX: Finished parsing modified {mod_path} ---')
+                print(f'--- [LOG] JSX: Starting structure comparison ---')
+                comp_result = comparator.compare_structures(tree1, tree2)
+                print(f'--- [LOG] JSX: Finished structure comparison ---')
+                pair['similarity'] = round(comp_result.similarity_score, 2)
+                pair['details'] = comp_result.to_dict()
+                all_scores.append(comp_result.similarity_score)
+                print(f'--- [LOG] JSX: Finished comparison for {pair["original"]} and {pair["modified"]} ---')
             # Tailwind class comparison for HTML and JSX
             if filetype in ('html', 'jsx'):
                 orig_path = os.path.join(original_dir, pair['original'])
@@ -369,24 +384,34 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
                     orig_content = f.read()
                 with open(mod_path, 'r', encoding='utf-8') as f:
                     mod_content = f.read()
-                print(f"Comparing {pair['original']} and {pair['modified']} as {filetype}")
-                print("ORIGINAL CONTENT:", orig_content[:200])
-                print("MODIFIED CONTENT:", mod_content[:200])
                 tw_result = tailwind_analyzer.compare_classes(orig_content, mod_content, filetype)
-                # Only aggregate if at least one set is non-empty
+                tw_result['file_pair'] = {'original': pair['original'], 'modified': pair['modified']}
+                tw_result['similarity'] = tw_result.get('hybrid_similarity', 0.0)
+                tw_result['match_type'] = pair.get('match_type', 'matched')
                 if tw_result['original_classes'] or tw_result['user_classes']:
                     tailwind_results.append(tw_result)
-                    tailwind_scores.append(tw_result['jaccard_similarity'])
-                else:
-                    print(f"Skipping {pair['original']} and {pair['modified']} for Tailwind comparison (no classes found)")
+                    tailwind_scores.append(tw_result['hybrid_similarity'])
+                    if 'set_jaccard_scores' not in locals():
+                        set_jaccard_scores = []
+                        freq_jaccard_scores = []
+                        hybrid_scores = []
+                        weighted_scores = []
+                        total_class_counts = []
+                    set_jaccard_scores.append(tw_result.get('set_jaccard', 0.0))
+                    freq_jaccard_scores.append(tw_result.get('frequency_weighted_jaccard', 0.0))
+                    hybrid_scores.append(tw_result.get('hybrid_similarity', 0.0))
+                    total_classes = sum(tw_result['original_classes'].values()) + sum(tw_result['user_classes'].values())
+                    weighted_scores.append((tw_result.get('hybrid_similarity', 0.0), total_classes))
+                    total_class_counts.append(total_classes)
+                # else:
+                #     print(f"Skipping {pair['original']} and {pair['modified']} for Tailwind comparison (no classes found)")
+        print(f'--- [LOG] {filetype}: pairwise comparison done ---')
         # Step 8: Aggregate (penalize unmatched files)
         num_matched = len(matched_pairs)
         num_unmatched = len(unmatched_files[filetype]['original']) + len(unmatched_files[filetype]['modified'])
         unique_matched = set([(m['original'], m['modified']) for m in matched_pairs])
         total_files = len(files1) + len(files2) - len(unique_matched)
-        # Gather similarity scores for matched pairs
         sim_scores = [pair.get('similarity', pair.get('score', 0.0)) for pair in matched_pairs]
-        # Add 0.0 for each unmatched file
         sim_scores += [0.0] * num_unmatched
         agg_score = sum(sim_scores) / total_files if total_files > 0 else 0.0
         results[filetype] = {
@@ -398,8 +423,30 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
             'aggregate_score': round(agg_score, 3)
         }
         predictions[filetype] = get_prediction(agg_score)
-    # Step 9: Prepare output JSON for UI
-    overall_similarity = round(sum(all_scores) / len(all_scores), 2) if all_scores else 0.0
+    print('--- [LOG] Aggregation and scoring done ---')
+    # --- Aggregation: file-count-based weighting ---
+    similarities = []
+    # HTML
+    for r in results.get('html', {}).get('matched_pairs', []):
+        similarities.append(r.get('similarity', r.get('score', 0.0)))
+    # JSX
+    for r in results.get('jsx', {}).get('matched_pairs', []):
+        similarities.append(r.get('similarity', r.get('score', 0.0)))
+    # CSS
+    for r in results.get('css', {}).get('matched_pairs', []):
+        similarities.append(r.get('similarity', r.get('score', 0.0)))
+    # Tailwind classes
+    for r in tailwind_results:
+        similarities.append(r['similarity'])
+    # Tailwind config (as a virtual file, if present)
+    config_sim = results.get('tailwind', {}).get('config_similarity', None)
+    if config_sim is not None:
+        similarities.append(config_sim)
+    # Compute file-count-weighted average
+    if similarities:
+        overall_similarity = sum(similarities) / len(similarities)
+    else:
+        overall_similarity = 0.0
     results['overall_similarity'] = overall_similarity
     results['prediction'] = {
         'overall_match_quality': get_prediction(overall_similarity),
@@ -407,26 +454,55 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
         'css_prediction': predictions.get('css', ''),
         'jsx_prediction': predictions.get('jsx', '')
     }
-    # Aggregate Tailwind class similarity
-    print('[DEBUG] tailwind_results before aggregation:', tailwind_results)
-    tailwind_similarity = sum(tailwind_scores) / len(tailwind_scores) if tailwind_scores else 1.0
-    # Merge all shared/only-in lists for summary
+    print('--- [LOG] Preparing Tailwind aggregation ---')
+    # Ensure these are always defined, even if no tailwind_results
     shared_classes = set()
     only_in_original = set()
     only_in_user = set()
+    change_impact_all = []
+    tailwind_similarity = sum(tailwind_scores) / len(tailwind_scores) if tailwind_scores else 1.0
+    set_jaccard_avg = sum(set_jaccard_scores) / len(set_jaccard_scores) if 'set_jaccard_scores' in locals() and set_jaccard_scores else 1.0
+    freq_jaccard_avg = sum(freq_jaccard_scores) / len(freq_jaccard_scores) if 'freq_jaccard_scores' in locals() and freq_jaccard_scores else 1.0
+    # Median and percent above 0.9
+    median_similarity = float(np.median(hybrid_scores)) if 'hybrid_scores' in locals() and hybrid_scores else 1.0
+    percent_above_90 = sum(1 for s in hybrid_scores if s >= 0.9) / len(hybrid_scores) if 'hybrid_scores' in locals() and hybrid_scores else 1.0
+    # Weighted average (by total class count per file)
+    weighted_sum = sum(score * weight for score, weight in weighted_scores) if 'weighted_scores' in locals() and weighted_scores else 0.0
+    total_weight = sum(weight for _, weight in weighted_scores) if 'weighted_scores' in locals() and weighted_scores else 0.0
+    weighted_avg = weighted_sum / total_weight if total_weight > 0 else 1.0
+    # Ignore files with only a single class difference if the rest are identical (soft aggregation)
+    filtered_scores = [r['hybrid_similarity'] for r in tailwind_results if not (len(r['change_impact']) == 1 and r['change_impact'][0]['count_diff'] == 1)]
+    soft_avg = sum(filtered_scores) / len(filtered_scores) if filtered_scores else tailwind_similarity
+    # Print/log per-file/component similarity table
+    print("\nTailwind Per-File Similarity Table:")
+    print(f"{'Original':30} {'Modified':30} {'Hybrid':>8} {'SetJac':>8} {'FreqJac':>8} TotalClasses")
     for r in tailwind_results:
-        shared_classes.update(r['shared_classes'])
-        only_in_original.update(r['only_in_original'])
-        only_in_user.update(r['only_in_user'])
+        o = r['file_pair']['original']
+        m = r['file_pair']['modified']
+        h = r.get('hybrid_similarity', 0.0)
+        sj = r.get('set_jaccard', 0.0)
+        fj = r.get('frequency_weighted_jaccard', 0.0)
+        tc = sum(r['original_classes'].values()) + sum(r['user_classes'].values())
+        print(f"{o:30} {m:30} {h:8.2f} {sj:8.2f} {fj:8.2f} {tc:11}")
     results['tailwind'] = {
         'class_similarity': tailwind_similarity,
+        'set_jaccard': set_jaccard_avg,
+        'frequency_weighted_jaccard': freq_jaccard_avg,
+        'median_similarity': median_similarity,
+        'percent_files_above_90': percent_above_90,
+        'weighted_average': weighted_avg,
+        'soft_average': soft_avg,
         'shared_classes': list(shared_classes),
         'only_in_original': list(only_in_original),
         'only_in_user': list(only_in_user),
-        'per_file_results': tailwind_results
+        'per_file_results': tailwind_results,
+        'change_impact': change_impact_all
     }
-    print('[DEBUG] results["tailwind"] after aggregation:', results['tailwind'])
-    # Robust summary aggregation
+    # Final debug prints for tracing
+    print("DEBUG: Final tailwind_similarity =", tailwind_similarity)
+    print("DEBUG: tailwind_scores =", tailwind_scores)
+    print("DEBUG: results['tailwind'] =", results['tailwind'])
+    print('--- [LOG] Tailwind aggregation done ---')
     def aggregate_html_summary(pairs):
         total = matching = different = missing = extra = 0
         for pair in pairs:
@@ -488,6 +564,32 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
         'html': results.get('html', {}).get('aggregate_score', 0.0),
         'jsx': results.get('jsx', {}).get('aggregate_score', 0.0),
         'css': results.get('css', {}).get('aggregate_score', 0.0),
-        'tailwind': results.get('tailwind', {}).get('class_similarity', 1.0)
+        'tailwind': results.get('tailwind', {}).get('class_similarity', 1.0),
+        'tailwind_set_jaccard': results.get('tailwind', {}).get('set_jaccard', 1.0),
+        'tailwind_frequency_weighted_jaccard': results.get('tailwind', {}).get('frequency_weighted_jaccard', 1.0)
     }
+    print('--- [LOG] Returning results from match_and_compare_all ---')
+    # --- Tailwind config comparison (if config files exist) ---
+    orig_config_files = list_files_by_type(original_dir).get('tailwind_config', [])
+    mod_config_files = list_files_by_type(modified_dir).get('tailwind_config', [])
+    config_results = []
+    if orig_config_files and mod_config_files:
+        for orig_cfg in orig_config_files:
+            for mod_cfg in mod_config_files:
+                print(f"[DEBUG] Running Tailwind config comparison for: {orig_cfg} vs {mod_cfg}")
+                cfg_result = tailwind_analyzer.compare_configs(os.path.join(original_dir, orig_cfg), os.path.join(modified_dir, mod_cfg))
+                print(f"[DEBUG] Tailwind config comparison result: improved_config_similarity={cfg_result.get('improved_config_similarity')}, shared_config_keys={cfg_result.get('shared_config_keys')}, only_in_original_config={cfg_result.get('only_in_original_config')}, only_in_user_config={cfg_result.get('only_in_user_config')}")
+                config_results.append(cfg_result)
+    # --- Aggregate config similarity into results['tailwind'] ---
+    if 'tailwind' in results:
+        if config_results:
+            avg_config_similarity = sum(r.get('improved_config_similarity', 0.0) for r in config_results) / len(config_results)
+            results['tailwind']['config_similarity'] = avg_config_similarity
+            # Add details from the first config result for UI
+            results['tailwind']['shared_config_keys'] = config_results[0].get('shared_config_keys', [])
+            results['tailwind']['only_in_original_config'] = config_results[0].get('only_in_original_config', [])
+            results['tailwind']['only_in_user_config'] = config_results[0].get('only_in_user_config', [])
+            results['tailwind']['shared_config_values'] = config_results[0].get('shared_config_values', {})
+        else:
+            results['tailwind']['config_similarity'] = 0.0
     return results 

@@ -3,16 +3,15 @@ import os
 import pytest
 import tempfile
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from core.jsx_parser import JSXParser
 from core.structure_comparator import StructureComparator
+from core.jsx_treesitter_parser import parse_jsx_with_treesitter
 
 def parse_jsx_string(jsx_str):
-    parser = JSXParser()
     with tempfile.NamedTemporaryFile('w+', suffix='.jsx', delete=False) as f:
         f.write(jsx_str)
         f.flush()
         path = f.name
-    tree = parser.parse_jsx_file(path)
+    tree = parse_jsx_with_treesitter(path)
     os.unlink(path)
     return tree
 
