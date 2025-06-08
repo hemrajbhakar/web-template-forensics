@@ -7,6 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 import json
+import glob
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
@@ -16,6 +17,7 @@ from flask import Flask, render_template, request, jsonify, send_file
 from core.forensic_analyzer import ForensicAnalyzer
 from core.css_style_checker import CSSStyleChecker
 from core.file_matcher import unzip_to_tempdir, match_and_compare_all
+from core.ui_framework_analyzer import UIFrameworkAnalyzer
 
 app = Flask(__name__)
 analyzer = ForensicAnalyzer()
@@ -230,8 +232,62 @@ def analyze_zip():
             mod_zip_path = mod_zip_temp.name
         orig_dir = unzip_to_tempdir(orig_zip_path)
         mod_dir = unzip_to_tempdir(mod_zip_path)
+        # Find Tailwind config files in both directories
+        orig_config_files = glob.glob(os.path.join(orig_dir, '**', 'tailwind.config.js'), recursive=True)
+        mod_config_files = glob.glob(os.path.join(mod_dir, '**', 'tailwind.config.js'), recursive=True)
+        config_pairs = []
+        for orig_cfg in orig_config_files:
+            for mod_cfg in mod_config_files:
+                config_pairs.append({
+                    'type': 'tailwind',
+                    'original_path': orig_cfg,
+                    'user_path': mod_cfg
+                })
         # Run matcher
         results = match_and_compare_all(orig_dir, mod_dir)
+        # Tailwind analysis
+        ui_analyzer = UIFrameworkAnalyzer()
+        # Collect all HTML/JSX/TSX file pairs for Tailwind class analysis
+        file_pairs = []
+        for pair in results.get('html', {}).get('matched_pairs', []):
+            orig_path = os.path.join(orig_dir, pair['original'])
+            user_path = os.path.join(mod_dir, pair['modified'])
+            with open(orig_path, 'r', encoding='utf-8') as f:
+                orig_content = f.read()
+            with open(user_path, 'r', encoding='utf-8') as f:
+                user_content = f.read()
+            file_pairs.append({'type': 'tailwind', 'original_content': orig_content, 'user_content': user_content, 'filetype': 'html'})
+        for pair in results.get('jsx', {}).get('matched_pairs', []):
+            orig_path = os.path.join(orig_dir, pair['original'])
+            user_path = os.path.join(mod_dir, pair['modified'])
+            with open(orig_path, 'r', encoding='utf-8') as f:
+                orig_content = f.read()
+            with open(user_path, 'r', encoding='utf-8') as f:
+                user_content = f.read()
+            file_pairs.append({'type': 'tailwind', 'original_content': orig_content, 'user_content': user_content, 'filetype': 'jsx'})
+        tw_results = ui_analyzer.analyze_all(file_pairs, config_pairs)
+        # Aggregate Tailwind class and config similarity
+        tailwind = tw_results.get('tailwind', {})
+        class_similarities = [r.get('jaccard_similarity', 0.0) for r in tailwind.get('class_results', [])]
+        config_similarities = [r.get('key_jaccard_similarity', 0.0) for r in tailwind.get('config_results', [])]
+        class_similarity = sum(class_similarities) / len(class_similarities) if class_similarities else 0.0
+        config_similarity = sum(config_similarities) / len(config_similarities) if config_similarities else 0.0
+        # For summary, use the first result (or empty)
+        class_result = tailwind.get('class_results', [{}])[0] if tailwind.get('class_results') else {}
+        config_result = tailwind.get('config_results', [{}])[0] if tailwind.get('config_results') else {}
+        print('[DEBUG] config_result:', config_result)
+        # Use correct keys from backend results
+        results['tailwind'] = {
+            'class_similarity': class_similarity,
+            'config_similarity': config_result.get('improved_config_similarity', config_similarity),
+            'shared_classes': class_result.get('shared_classes', []),
+            'only_in_original': class_result.get('only_in_original', []),
+            'only_in_user': class_result.get('only_in_user', []),
+            'shared_config_keys': config_result.get('shared_config_keys', []),
+            'only_in_original_config': config_result.get('only_in_original_config', []),
+            'only_in_user_config': config_result.get('only_in_user_config', []),
+            'shared_config_values': config_result.get('shared_config_values', {}),
+        }
         # Aggregate summary for all matched pairs (robust version)
         def aggregate_html_summary(pairs):
             total = matching = different = missing = extra = 0
@@ -288,13 +344,51 @@ def analyze_zip():
             'html': aggregate_html_summary(results.get('html', {}).get('matched_pairs', [])),
             'jsx': aggregate_jsx_summary(results.get('jsx', {}).get('matched_pairs', [])),
             'css': aggregate_css_summary(results.get('css', {}).get('matched_pairs', [])),
+            'tailwind': {
+                'class_similarity': class_similarity,
+                'config_similarity': config_result.get('improved_config_similarity', config_similarity),
+                'shared_classes': class_result.get('shared_classes', []),
+                'only_in_original': class_result.get('only_in_original', []),
+                'only_in_user': class_result.get('only_in_user', []),
+                'shared_config_keys': config_result.get('shared_config_keys', []),
+                'only_in_original_config': config_result.get('only_in_original_config', []),
+                'only_in_user_config': config_result.get('only_in_user_config', []),
+                'shared_config_values': config_result.get('shared_config_values', {}),
+            }
         }
         # Add compatibility field for frontend
+        html_score = results.get('html', {}).get('aggregate_score', 0.0)
+        css_score = results.get('css', {}).get('aggregate_score', 0.0)
+        jsx_score = results.get('jsx', {}).get('aggregate_score', 0.0)
+        tailwind_score = class_similarity
+        # Determine which categories are present (at least one file in either folder)
+        present = {}
+        base_weights = {'html': 0.4, 'css': 0.2, 'jsx': 0.2, 'tailwind': 0.2}
+        if results.get('html', {}).get('matched_pairs') or results.get('html', {}).get('unmatched_original') or results.get('html', {}).get('unmatched_modified'):
+            present['html'] = html_score
+        if results.get('css', {}).get('matched_pairs') or results.get('css', {}).get('unmatched_original') or results.get('css', {}).get('unmatched_modified'):
+            present['css'] = css_score
+        if results.get('jsx', {}).get('matched_pairs') or results.get('jsx', {}).get('unmatched_original') or results.get('jsx', {}).get('unmatched_modified'):
+            present['jsx'] = jsx_score
+        # For tailwind, check if any class_results or config_results exist
+        if (results.get('tailwind', {}).get('class_similarity', 0.0) > 0 or
+            results.get('tailwind', {}).get('config_similarity', 0.0) > 0 or
+            results.get('tailwind', {}).get('shared_classes') or
+            results.get('tailwind', {}).get('shared_config_keys')):
+            present['tailwind'] = tailwind_score
+        # Normalize weights
+        present_weights = {k: base_weights[k] for k in present}
+        total_weight = sum(present_weights.values())
+        if total_weight == 0:
+            weighted = 0.0
+        else:
+            weighted = sum(present[k] * (present_weights[k] / total_weight) for k in present)
         results['similarity_scores'] = {
-            'overall': results.get('overall_similarity', 0.0),
-            'html': results.get('html', {}).get('aggregate_score', 0.0),
-            'jsx': results.get('jsx', {}).get('aggregate_score', 0.0),
-            'css': results.get('css', {}).get('aggregate_score', 0.0)
+            'overall': weighted,
+            'html': html_score,
+            'jsx': jsx_score,
+            'css': css_score,
+            'tailwind': tailwind_score
         }
         # Optionally, save report for download
         report_path = TEMP_DIR / 'report.json'

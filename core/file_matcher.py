@@ -9,6 +9,7 @@ from .html_parser import HTMLParser
 from .jsx_parser import JSXParser
 from .structure_comparator import StructureComparator
 from .css_style_checker import CSSStyleChecker
+from .tailwind_analyzer import TailwindAnalyzer
 
 # --- Step 1: Unzip & list files ---
 def unzip_to_tempdir(zip_path: str) -> str:
@@ -285,6 +286,9 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
     files_unmatched = {ftype: 0 for ftype in file_types}
     files_compared = {ftype: 0 for ftype in file_types}
     predictions = {}
+    tailwind_results = []
+    tailwind_scores = []
+    tailwind_analyzer = TailwindAnalyzer()
     for filetype in file_types:
         files1 = list_files_by_type(original_dir).get(filetype, [])
         files2 = list_files_by_type(modified_dir).get(filetype, [])
@@ -357,6 +361,24 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
                 pair['similarity'] = comp_result['css_similarity']
                 pair['details'] = comp_result
                 all_scores.append(comp_result['css_similarity'])
+            # Tailwind class comparison for HTML and JSX
+            if filetype in ('html', 'jsx'):
+                orig_path = os.path.join(original_dir, pair['original'])
+                mod_path = os.path.join(modified_dir, pair['modified'])
+                with open(orig_path, 'r', encoding='utf-8') as f:
+                    orig_content = f.read()
+                with open(mod_path, 'r', encoding='utf-8') as f:
+                    mod_content = f.read()
+                print(f"Comparing {pair['original']} and {pair['modified']} as {filetype}")
+                print("ORIGINAL CONTENT:", orig_content[:200])
+                print("MODIFIED CONTENT:", mod_content[:200])
+                tw_result = tailwind_analyzer.compare_classes(orig_content, mod_content, filetype)
+                # Only aggregate if at least one set is non-empty
+                if tw_result['original_classes'] or tw_result['user_classes']:
+                    tailwind_results.append(tw_result)
+                    tailwind_scores.append(tw_result['jaccard_similarity'])
+                else:
+                    print(f"Skipping {pair['original']} and {pair['modified']} for Tailwind comparison (no classes found)")
         # Step 8: Aggregate (penalize unmatched files)
         num_matched = len(matched_pairs)
         num_unmatched = len(unmatched_files[filetype]['original']) + len(unmatched_files[filetype]['modified'])
@@ -385,6 +407,25 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
         'css_prediction': predictions.get('css', ''),
         'jsx_prediction': predictions.get('jsx', '')
     }
+    # Aggregate Tailwind class similarity
+    print('[DEBUG] tailwind_results before aggregation:', tailwind_results)
+    tailwind_similarity = sum(tailwind_scores) / len(tailwind_scores) if tailwind_scores else 1.0
+    # Merge all shared/only-in lists for summary
+    shared_classes = set()
+    only_in_original = set()
+    only_in_user = set()
+    for r in tailwind_results:
+        shared_classes.update(r['shared_classes'])
+        only_in_original.update(r['only_in_original'])
+        only_in_user.update(r['only_in_user'])
+    results['tailwind'] = {
+        'class_similarity': tailwind_similarity,
+        'shared_classes': list(shared_classes),
+        'only_in_original': list(only_in_original),
+        'only_in_user': list(only_in_user),
+        'per_file_results': tailwind_results
+    }
+    print('[DEBUG] results["tailwind"] after aggregation:', results['tailwind'])
     # Robust summary aggregation
     def aggregate_html_summary(pairs):
         total = matching = different = missing = extra = 0
@@ -446,6 +487,7 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
         'overall': results.get('overall_similarity', 0.0),
         'html': results.get('html', {}).get('aggregate_score', 0.0),
         'jsx': results.get('jsx', {}).get('aggregate_score', 0.0),
-        'css': results.get('css', {}).get('aggregate_score', 0.0)
+        'css': results.get('css', {}).get('aggregate_score', 0.0),
+        'tailwind': results.get('tailwind', {}).get('class_similarity', 1.0)
     }
     return results 

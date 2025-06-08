@@ -52,7 +52,7 @@
         <div id="results" class="hidden space-y-8">
             <div class="bg-white rounded-lg shadow-lg p-6">
                 <h2 class="text-2xl font-semibold text-gray-800 mb-4">Analysis Results</h2>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-6">
                     <div>
                         <h3 class="text-lg font-medium text-gray-700 mb-4">Overall Similarity</h3>
                         <div class="relative pt-1">
@@ -110,6 +110,36 @@
                             </div>
                             <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-pink-200">
                                 <div id="cssBar" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-pink-500" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-700 mb-4">Tailwind Class Similarity</h3>
+                        <div class="relative pt-1">
+                            <div class="flex mb-2 items-center justify-between">
+                                <div>
+                                    <span id="tailwindClassScore" class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-blue-600 bg-blue-200">
+                                        0%
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-blue-200">
+                                <div id="tailwindClassBar" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-700 mb-4">Tailwind Config Similarity</h3>
+                        <div class="relative pt-1">
+                            <div class="flex mb-2 items-center justify-between">
+                                <div>
+                                    <span id="tailwindConfigScore" class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-green-600 bg-green-200">
+                                        0%
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-green-200">
+                                <div id="tailwindConfigBar" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-green-500" style="width: 0%"></div>
                             </div>
                         </div>
                     </div>
@@ -237,6 +267,19 @@
             // Update summary
             const summary = document.getElementById('reportSummary');
             summary.innerHTML = generateSummaryHTML(data.summary);
+
+            // Tailwind class/config similarity
+            if (data.tailwind) {
+                const tw = data.tailwind;
+                // Class similarity
+                const classScore = Math.round((tw.class_similarity || 0) * 100);
+                document.getElementById('tailwindClassScore').textContent = `${classScore}%`;
+                document.getElementById('tailwindClassBar').style.width = `${classScore}%`;
+                // Config similarity
+                const configScore = Math.round((tw.config_similarity || 0) * 100);
+                document.getElementById('tailwindConfigScore').textContent = `${configScore}%`;
+                document.getElementById('tailwindConfigBar').style.width = `${configScore}%`;
+            }
         }
         
         function updateScore(type, score) {
@@ -293,7 +336,7 @@
         }
         
         function generateSummaryHTML(summary) {
-            return `
+            let html = `
                 <div class="grid grid-cols-3 gap-8">
                     <div class="space-y-4">
                         <h3 class="text-lg font-medium text-gray-900">HTML Comparison</h3>
@@ -360,6 +403,61 @@
                     </div>
                 </div>
             `;
+
+            // Add Tailwind summary if present
+            if (summary.tailwind) {
+                const sharedClasses = summary.tailwind.shared_classes?.length || 0;
+                const onlyInOriginal = summary.tailwind.only_in_original?.length || 0;
+                const onlyInUser = summary.tailwind.only_in_user?.length || 0;
+                const sharedKeys = summary.tailwind.shared_config_keys?.length || 0;
+                const onlyInOriginalConfig = summary.tailwind.only_in_original_config?.length || 0;
+                const onlyInUserConfig = summary.tailwind.only_in_user_config?.length || 0;
+                html += `
+                <div class="space-y-4 mt-8">
+                    <h3 class="text-xl font-semibold text-blue-900 mb-4">Tailwind Comparison</h3>
+                    <div class="grid grid-cols-2 gap-8">
+                        <!-- Tailwind Class Comparison -->
+                        <div>
+                            <h4 class="text-lg font-medium text-blue-900 mb-2">Class Comparison</h4>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div class="p-4 bg-blue-50 rounded-lg">
+                                    <h5 class="font-medium text-blue-700">Shared</h5>
+                                    <p class="text-2xl font-bold text-blue-900">${sharedClasses}</p>
+                                </div>
+                                <div class="p-4 bg-gray-50 rounded-lg">
+                                    <h5 class="font-medium text-gray-700">Only in Original</h5>
+                                    <p class="text-2xl font-bold text-gray-900">${onlyInOriginal}</p>
+                                </div>
+                                <div class="p-4 bg-green-50 rounded-lg">
+                                    <h5 class="font-medium text-green-700">Only in Modified</h5>
+                                    <p class="text-2xl font-bold text-green-900">${onlyInUser}</p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Tailwind Config Comparison -->
+                        <div>
+                            <h4 class="text-lg font-medium text-green-900 mb-2">Config Comparison</h4>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div class="p-4 bg-green-50 rounded-lg">
+                                    <h5 class="font-medium text-green-700">Shared</h5>
+                                    <p class="text-2xl font-bold text-green-900">${sharedKeys}</p>
+                                </div>
+                                <div class="p-4 bg-gray-50 rounded-lg">
+                                    <h5 class="font-medium text-gray-700">Only in Original</h5>
+                                    <p class="text-2xl font-bold text-gray-900">${onlyInOriginalConfig}</p>
+                                </div>
+                                <div class="p-4 bg-blue-50 rounded-lg">
+                                    <h5 class="font-medium text-blue-700">Only in Modified</h5>
+                                    <p class="text-2xl font-bold text-blue-900">${onlyInUserConfig}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                `;
+            }
+
+            return html;
         }
     </script>
 </body>

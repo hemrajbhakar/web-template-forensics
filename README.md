@@ -1,7 +1,7 @@
 # Forensic Template Comparison Tool
 
 ## Overview
-This tool performs forensic comparison of two zipped web project folders, analyzing HTML, CSS, and JSX/TSX files for structural and content similarity. It is designed for plagiarism detection, code review, and template analysis.
+This tool performs forensic comparison of two zipped web project folders, analyzing HTML, CSS, JSX/TSX, and Tailwind usage for structural and content similarity. It is designed for plagiarism detection, code review, and template analysis.
 
 ## Features
 - **Upload two zip files** (original and modified project folders)
@@ -12,6 +12,12 @@ This tool performs forensic comparison of two zipped web project folders, analyz
   - Content similarity (for CSS)
   - Contextual (folder/neighbor) matching
 - **Per-file-type comparison** (HTML, CSS, JSX/TSX)
+- **Tailwind CSS analysis**:
+  - Extracts and compares Tailwind utility classes from markup (HTML/JSX/TSX)
+  - Computes Jaccard similarity between class sets
+  - Parses and compares `tailwind.config.js` files (using Node.js)
+  - Penalizes unmatched or highly divergent Tailwind usage/configs in the overall score
+- **Extensible UI framework analyzer system** (easy to add analyzers for other frameworks)
 - **Robust similarity scoring** with penalization for unmatched files
 - **Detailed JSON and UI reporting**
 
@@ -22,7 +28,7 @@ This tool performs forensic comparison of two zipped web project folders, analyz
 - Each zip is extracted to a temporary directory.
 
 ### 2. File Matching Logic
-For each file type (HTML, CSS, JSX/TSX):
+For each file type (HTML, CSS, JSX/TSX, Tailwind):
 1. **Exact Path-Based Match:**
    - Files with the same relative path and filename are paired.
 2. **Fuzzy Filename Match:**
@@ -30,6 +36,7 @@ For each file type (HTML, CSS, JSX/TSX):
 3. **Structure/AST-Based Match:**
    - For HTML/JSX: Compare DOM/AST structure (element count, depth, attributes, etc.).
    - For CSS: Compare selectors and property sets.
+   - For Tailwind: Extract and compare utility classes from markup files.
 4. **Content Similarity Match (CSS):**
    - For remaining unmatched CSS files, compare raw content similarity. Pairs above a threshold are matched.
 5. **Contextual Match:**
@@ -42,6 +49,10 @@ For each file type (HTML, CSS, JSX/TSX):
   - For each matched selector, compares property-value pairs with normalization (e.g., `#fff` == `#ffffff`, `10px` == `10.0px`).
   - Selector similarity = number of matching properties / total unique properties.
   - Per-selector similarity is reported in the output.
+- **Tailwind:**
+  - Extracts all Tailwind utility classes from markup files.
+  - Computes Jaccard similarity between class sets for each matched file pair.
+  - Parses and compares `tailwind.config.js` files using Node.js, reporting key overlap and config differences.
 
 ### 4. Scoring and Penalization
 - For each file type, the aggregate similarity score is:
@@ -54,23 +65,34 @@ For each file type (HTML, CSS, JSX/TSX):
   - If selector similarity >= 0.9: counted as exact match.
   - If 0.3 <= similarity < 0.9: partial credit (actual similarity fraction).
   - If < 0.3: treated as different.
-- **Overall score** is the average of all per-type scores, weighted by the number of files.
+- **Tailwind class/config similarity:**
+  - Jaccard similarity is used for class sets and config keys.
+  - Highly divergent Tailwind usage/configs are penalized in the overall score.
+- **Dynamic Weighted Overall Score:**
+  - The overall similarity is a weighted average of the present categories (HTML, CSS, JSX, Tailwind):
+    - Default weights: HTML 0.4, CSS 0.2, JSX 0.2, Tailwind 0.2
+    - **Only categories with at least one file present in either folder are included.**
+    - Weights are normalized so the sum is 1.0 for the present categories.
+    - Example: If only HTML and CSS are present, weights become HTML 0.67, CSS 0.33.
+- **Overall score** is the average of all per-type scores, weighted by the number of files and normalized weights.
 
 ### 5. Output & Reporting
 - The tool returns a detailed JSON report including:
-  - Per-type summary (HTML, CSS, JSX):
+  - Per-type summary (HTML, CSS, JSX, Tailwind):
     - Number of files compared, matched, unmatched
     - List of matched pairs with similarity scores and match type
     - List of unmatched files (original and modified)
     - Aggregate similarity score (with penalization)
     - Per-selector similarity details for CSS
+    - Per-file and config similarity details for Tailwind
   - Overall similarity score
   - Prediction verdicts (overall and per-type)
 - The UI displays:
   - Overall and per-type similarity scores
-  - Charts and breakdowns for each file type
+  - Charts and breakdowns for each file type (including Tailwind)
   - Prediction verdicts
   - Lists of unmatched files
+  - Tailwind class and config similarity breakdowns
 
 ## Example Scoring
 If you have 2 matched CSS files (similarity 0.5 and 0.0) and 2 unmatched files, the final score is:
@@ -87,14 +109,16 @@ final_score = (0.5 + 0.0 + 0.0 + 0.0) / 4 = 0.125
 - Flask
 - tinycss2
 - BeautifulSoup4
+- Node.js (for Tailwind config parsing)
 - (See requirements.txt for full list)
 
 ## Notes
 - Unmatched files are penalized in the final similarity score.
 - All normalization and matching logic is robust to whitespace, formatting, and minor code changes.
+- Tailwind analysis is extensible; more UI frameworks can be added easily.
 
 ---
-For more details, see the code and comments in `core/file_matcher.py` and `core/css_style_checker.py`.
+For more details, see the code and comments in `core/file_matcher.py`, `core/css_style_checker.py`, `core/ui_framework_analyzer.py`, and `core/tailwind_analyzer.py`.
 
 ## Project Structure
 
@@ -104,7 +128,9 @@ jsx-forensic-tool/
 │   ├── __init__.py
 │   ├── forensic_analyzer.py   # Main interface
 │   ├── html_parser.py         # HTML parsing logic
-│   └── structure_comparator.py # Comparison logic
+│   ├── structure_comparator.py # Comparison logic
+│   ├── tailwind_analyzer.py   # Tailwind utility class/config analysis
+│   └── ui_framework_analyzer.py # UI framework analyzer manager (extensible)
 ├── web/
 │   ├── app.py                 # Flask web application
 │   └── templates/
