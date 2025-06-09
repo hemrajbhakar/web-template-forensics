@@ -83,19 +83,11 @@ jobs:
           EOF
         shell: bash
 
-<<<<<<< HEAD
-      - name: Check tree-sitter version and API
-        run: |
-          python -c "import tree_sitter; print(f'tree-sitter version: {tree_sitter.__version__}')"
-          python -c "import tree_sitter; print('tree_sitter module contents:', dir(tree_sitter))" || true
-          python -c "from tree_sitter import Language; print('Language class methods:', [m for m in dir(Language) if not m.startswith('_')])" || true
-=======
       - name: Check tree-sitter installation
         run: |
           python -c "import tree_sitter; print('tree_sitter module imported successfully')"
           python -c "from tree_sitter import Language; print('Language class available:', 'build_library' in dir(Language))"
           pip show tree-sitter
->>>>>>> 58e018fbacf0b895b5c2df297c3ef3ec14de0c0e
         shell: bash
 
       - name: Build language library
@@ -194,17 +186,6 @@ jobs:
             fi
           done
           
-<<<<<<< HEAD
-          # Final verification
-          echo ""
-          echo "Files to be committed:"
-          find prebuilt -type f $$ -name "*.so" -o -name "*.dll" -o -name "*.dylib" $$ | sort
-          
-          # Count files
-          file_count=$(find prebuilt -type f $$ -name "*.so" -o -name "*.dll" -o -name "*.dylib" $$ | wc -l)
-          if [ "$file_count" -ne 3 ]; then
-            echo "❌ ERROR: Expected 3 library files, found $file_count"
-=======
           # Final verification - look for actual filenames
           echo ""
           echo "Files to be committed:"
@@ -216,7 +197,6 @@ jobs:
             echo "❌ ERROR: Expected 3 library files, found $file_count"
             echo "Looking for pattern 'my-languages.*' in prebuilt directory:"
             find prebuilt -type f | sort
->>>>>>> 58e018fbacf0b895b5c2df297c3ef3ec14de0c0e
             exit 1
           fi
           echo "✅ All 3 platform libraries found and ready to commit"
@@ -267,8 +247,4 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: artifacts/*.tar.gz
-<<<<<<< HEAD
           generate_release_notes: true
-=======
-          generate_release_notes: true
->>>>>>> 58e018fbacf0b895b5c2df297c3ef3ec14de0c0e
