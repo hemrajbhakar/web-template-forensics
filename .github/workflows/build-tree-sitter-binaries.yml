@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install tree-sitter
+      - name: Install dependencies
         run: pip install tree_sitter
 
       - name: Clone grammars
@@ -29,14 +29,10 @@ jobs:
           git clone https://github.com/tree-sitter/tree-sitter-javascript.git
           git clone https://github.com/tree-sitter/tree-sitter-typescript.git
 
-      - name: Install npm (Linux only)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get install -y npm
-
-      - name: Install grammar dependencies
+      - name: Install npm dependencies
         run: |
-          cd tree-sitter-javascript && npm install || true
-          cd ../tree-sitter-typescript/typescript && npm install || true
+          cd tree-sitter-javascript && npm install
+          cd ../tree-sitter-typescript/typescript && npm install
         shell: bash
 
       - name: Determine extension
@@ -51,25 +47,179 @@ jobs:
           fi
         shell: bash
 
-      - name: Build language library
-        run: |
-          mkdir -p build
-          cat > build/build_parsers.py <<EOF
-from tree_sitter import Language
-Language.build_library(
-  "build/my-languages.${{ steps.ext.outputs.ext }}",
-  ["tree-sitter-javascript", "tree-sitter-typescript/typescript"]
-)
-EOF
-          python build/build_parsers.py
+      - name: Create build directory
+        run: mkdir -p build
+        shell: bash
 
-      - name: Move output to prebuilt folder
+      - name: Create build script
+        run: |
+          cat > build/build_parsers.py << 'EOF'
+          from tree_sitter import Language
+          import os
+          
+          # Get the file extension from environment
+          ext = os.environ.get('FILE_EXT', 'so')
+          
+          Language.build_library(
+            f"build/my-languages.{ext}",
+            ["tree-sitter-javascript", "tree-sitter-typescript/typescript"]
+          )
+          EOF
+        shell: bash
+
+      - name: Build language library
+        env:
+          FILE_EXT: ${{ steps.ext.outputs.ext }}
+        run: python build/build_parsers.py
+
+      - name: Verify build output
+        run: |
+          echo "Checking for built library..."
+          if [ ! -f "build/my-languages.${{ steps.ext.outputs.ext }}" ]; then
+            echo "❌ ERROR: Expected file 'build/my-languages.${{ steps.ext.outputs.ext }}' not found!"
+            echo "Build directory contents:"
+            ls -la build/ || echo "Build directory not found"
+            exit 1
+          fi
+          echo "✅ Successfully built: build/my-languages.${{ steps.ext.outputs.ext }}"
+          echo "File size: $(ls -lh build/my-languages.${{ steps.ext.outputs.ext }} | awk '{print $5}')"
+        shell: bash
+
+      - name: Prepare output directory
         run: |
           mkdir -p prebuilt/${{ matrix.os }}
-          cp build/my-languages.* prebuilt/${{ matrix.os }}/
+          cp build/my-languages.${{ steps.ext.outputs.ext }} prebuilt/${{ matrix.os }}/
+          
+          # Verify the copy was successful
+          if [ ! -f "prebuilt/${{ matrix.os }}/my-languages.${{ steps.ext.outputs.ext }}" ]; then
+            echo "❌ ERROR: Failed to copy library to prebuilt directory"
+            exit 1
+          fi
+          echo "✅ Library copied successfully to prebuilt/${{ matrix.os }}/"
+        shell: bash
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: parser-${{ matrix.os }}
+          path: prebuilt/${{ matrix.os }}/
+          retention-days: 7  # Increased from 1 to 7 for better debugging
+
+  commit-binaries:
+    needs: build-parsers
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.ref }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - name: Verify downloaded artifacts
+        run: |
+          echo "Downloaded artifacts structure:"
+          find artifacts -type f -name "*" | sort
+          
+          # Check each platform
+          for platform in ubuntu-latest windows-latest macos-latest; do
+            echo ""
+            echo "Checking $platform..."
+            if [ -d "artifacts/parser-$platform" ]; then
+              file_count=$(find "artifacts/parser-$platform" -type f | wc -l)
+              if [ "$file_count" -eq 0 ]; then
+                echo "❌ ERROR: No files found for $platform"
+                exit 1
+              else
+                echo "✅ Found $file_count file(s) for $platform"
+                ls -la "artifacts/parser-$platform/"
+              fi
+            else
+              echo "❌ ERROR: Artifact directory not found for $platform"
+              exit 1
+            fi
+          done
+
+      - name: Organize binaries
+        run: |
+          # Clean existing prebuilt directory to avoid conflicts
+          rm -rf prebuilt
+          mkdir -p prebuilt
+          
+          # Copy artifacts to final structure
+          for platform in ubuntu-latest windows-latest macos-latest; do
+            if [ -d "artifacts/parser-$platform" ]; then
+              mkdir -p "prebuilt/$platform"
+              cp -r artifacts/parser-$platform/* "prebuilt/$platform/"
+            fi
+          done
+          
+          # Final verification
+          echo ""
+          echo "Files to be committed:"
+          find prebuilt -type f $$ -name "*.so" -o -name "*.dll" -o -name "*.dylib" $$ | sort
+          
+          # Count files
+          file_count=$(find prebuilt -type f $$ -name "*.so" -o -name "*.dll" -o -name "*.dylib" $$ | wc -l)
+          if [ "$file_count" -ne 3 ]; then
+            echo "❌ ERROR: Expected 3 library files, found $file_count"
+            exit 1
+          fi
+          echo "✅ All 3 platform libraries found and ready to commit"
 
       - name: Commit and push binaries
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "🤖 Add prebuilt parser binaries for ${{ matrix.os }}"
-          file_pattern: prebuilt/*
+          commit_message: "🤖 Add prebuilt parser binaries for all platforms"
+          file_pattern: prebuilt/**/*
+          commit_user_name: github-actions[bot]
+          commit_user_email: github-actions[bot]@users.noreply.github.com
+          commit_author: GitHub Actions <github-actions[bot]@users.noreply.github.com>
+
+  # Optional: Create release artifacts when tagging
+  create-release:
+    needs: build-parsers
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - name: Create release archives
+        run: |
+          cd artifacts
+          for os in parser-*; do
+            # Verify content before archiving
+            if [ -d "$os" ] && [ "$(find "$os" -type f | wc -l)" -gt 0 ]; then
+              tar czf "${os}.tar.gz" "$os"
+              echo "✅ Created archive: ${os}.tar.gz"
+            else
+              echo "⚠️  Skipping empty directory: $os"
+            fi
+          done
+          
+          # List archives
+          echo ""
+          echo "Release archives created:"
+          ls -lh *.tar.gz
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/*.tar.gz
+          generate_release_notes: true
