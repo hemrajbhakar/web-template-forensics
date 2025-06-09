@@ -186,15 +186,17 @@ jobs:
             fi
           done
           
-          # Final verification
+          # Final verification - look for actual filenames
           echo ""
           echo "Files to be committed:"
-          find prebuilt -type f $$ -name "*.so" -o -name "*.dll" -o -name "*.dylib" $$ | sort
+          find prebuilt -type f -name "my-languages.*" | sort
           
-          # Count files
-          file_count=$(find prebuilt -type f $$ -name "*.so" -o -name "*.dll" -o -name "*.dylib" $$ | wc -l)
+          # Count files - look for my-languages.* files
+          file_count=$(find prebuilt -type f -name "my-languages.*" | wc -l)
           if [ "$file_count" -ne 3 ]; then
             echo "❌ ERROR: Expected 3 library files, found $file_count"
+            echo "Looking for pattern 'my-languages.*' in prebuilt directory:"
+            find prebuilt -type f | sort
             exit 1
           fi
           echo "✅ All 3 platform libraries found and ready to commit"
