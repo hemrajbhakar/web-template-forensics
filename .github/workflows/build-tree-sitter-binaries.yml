@@ -2,9 +2,9 @@ name: Build Tree-sitter Parsers
 
 on:
   push:
-    branches: [dev]
+    branches: [main]  # Changed from dev to main
     tags: ['v*']
-  workflow_dispatch:  # Added for manual testing
+  workflow_dispatch:  # Manual trigger when needed
 
 jobs:
   build-parsers:
@@ -131,7 +131,10 @@ jobs:
   commit-binaries:
     needs: build-parsers
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    # Updated condition: run on main branch push or manual workflow dispatch
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch'
     
     permissions:
       contents: write
@@ -237,7 +240,7 @@ jobs:
           
           # Commit and push
           if [ -n "$(git status --porcelain prebuilt/)" ]; then
-            git commit -m "🤖 Add prebuilt parser binaries for all platforms"
+            git commit -m "🤖 Update prebuilt parser binaries for all platforms"
             git push origin ${{ github.ref }}
           else
             echo "No changes to commit in prebuilt directory"
@@ -283,3 +286,5 @@ jobs:
         with:
           files: artifacts/*.tar.gz
           generate_release_notes: true
+          draft: false
+          prerelease: false
