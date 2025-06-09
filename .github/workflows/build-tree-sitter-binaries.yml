@@ -142,6 +142,11 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Pull latest changes
+        run: |
+          git pull origin ${{ github.ref }} || true
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -174,32 +179,29 @@ jobs:
 
       - name: Organize binaries
         run: |
-          # Clean existing prebuilt directory to avoid conflicts
-          rm -rf prebuilt
-          mkdir -p prebuilt
+          # Show current repo state
+          echo "Current prebuilt directory in repo:"
+          ls -la prebuilt/ 2>/dev/null || echo "No prebuilt directory exists"
           
-          # Create all platform directories explicitly
+          # Create all platform directories
           mkdir -p prebuilt/ubuntu-latest
           mkdir -p prebuilt/windows-latest
           mkdir -p prebuilt/macos-latest
           
-          # Copy artifacts to final structure with verification
+          # Copy artifacts to final structure
           echo "Copying Ubuntu artifacts..."
-          cp artifacts/parser-ubuntu-latest/* prebuilt/ubuntu-latest/
-          ls -la prebuilt/ubuntu-latest/
+          cp -v artifacts/parser-ubuntu-latest/* prebuilt/ubuntu-latest/
           
           echo "Copying Windows artifacts..."
-          cp artifacts/parser-windows-latest/* prebuilt/windows-latest/
-          ls -la prebuilt/windows-latest/
+          cp -v artifacts/parser-windows-latest/* prebuilt/windows-latest/
           
           echo "Copying macOS artifacts..."
-          cp artifacts/parser-macos-latest/* prebuilt/macos-latest/
-          ls -la prebuilt/macos-latest/
+          cp -v artifacts/parser-macos-latest/* prebuilt/macos-latest/
           
           # Final verification
           echo ""
           echo "Complete prebuilt directory structure:"
-          tree prebuilt || find prebuilt -type f | sort
+          find prebuilt -type f -name "*.so" -o -name "*.dll" -o -name "*.dylib" | sort
           
           # Verify all files exist
           test -f prebuilt/ubuntu-latest/my-languages.so || (echo "❌ Ubuntu file missing!" && exit 1)
@@ -214,19 +216,33 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # Add all prebuilt files
-          git add -A prebuilt/
+          # Check what's currently tracked
+          echo "Currently tracked prebuilt files:"
+          git ls-files prebuilt/ || echo "No prebuilt files tracked"
+          
+          # Force add all prebuilt files
+          git add -f prebuilt/ubuntu-latest/my-languages.so
+          git add -f prebuilt/windows-latest/my-languages.dll
+          git add -f prebuilt/macos-latest/my-languages.dylib
           
           # Show what will be committed
+          echo ""
           echo "Files staged for commit:"
           git status --porcelain
           
-          # Commit if there are changes
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
+          # Show full status
+          echo ""
+          echo "Full git status:"
+          git status
+          
+          # Commit and push
+          if [ -n "$(git status --porcelain prebuilt/)" ]; then
             git commit -m "🤖 Add prebuilt parser binaries for all platforms"
-            git push
+            git push origin ${{ github.ref }}
+          else
+            echo "No changes to commit in prebuilt directory"
+            echo "Checking if files already exist in repo..."
+            git ls-tree -r HEAD --name-only | grep "^prebuilt/" | sort
           fi
 
   # Optional: Create release artifacts when tagging
