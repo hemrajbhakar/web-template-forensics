@@ -10,6 +10,7 @@ from .html_parser import HTMLParser
 from .structure_comparator import StructureComparator, ComparisonResult
 import subprocess
 import tempfile
+from core.jsx_treesitter_parser import parse_jsx_with_treesitter
 
 class TemplateComparison:
     def __init__(self, 
@@ -75,26 +76,15 @@ class ForensicAnalyzer:
         return self.last_result
     
     def _parse_jsx(self, content: str) -> Dict:
-        """Parse JSX content using the Node.js tree-sitter parser (jsx_parser.js)."""
+        """Parse JSX content using the Python tree-sitter parser (prebuilt binary)."""
         try:
             with tempfile.NamedTemporaryFile(suffix='.jsx', delete=False, mode='w', encoding='utf-8') as jsx_file:
                 jsx_file.write(content)
                 jsx_file_path = jsx_file.name
-            with tempfile.NamedTemporaryFile(suffix='.json', delete=False, mode='r+', encoding='utf-8') as ast_file:
-                ast_file_path = ast_file.name
-            # Call the Node.js parser
-            result = subprocess.run([
-                'node', 'jsx_parser.js', jsx_file_path, ast_file_path
-            ], capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"JSX parser error: {result.stderr}")
-                return {}
-            # Read the AST JSON
-            with open(ast_file_path, 'r', encoding='utf-8') as f:
-                ast = json.load(f)
+            ast = parse_jsx_with_treesitter(jsx_file_path)
             return ast
         except Exception as e:
-            print(f"Error running Node.js JSX parser: {e}")
+            print(f"Error running Python tree-sitter JSX parser: {e}")
             return {}
     
     def generate_report(self, output_path: Optional[Union[str, Path]] = None) -> str:

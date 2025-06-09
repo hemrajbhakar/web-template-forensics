@@ -12,3 +12,5 @@ python-dotenv>=1.0.0
 numpy>=1.24.0
 Pillow>=10.0.0
 tinycss2==1.4.0
+tree-sitter==0.20.1
+pytest>=7.4.0

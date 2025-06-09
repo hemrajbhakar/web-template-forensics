@@ -8,6 +8,15 @@ import tempfile
 from pathlib import Path
 import json
 import glob
+import tree_sitter
+try:
+    import importlib.metadata
+    version = importlib.metadata.version("tree-sitter")
+except ImportError:
+    import pkg_resources
+    version = pkg_resources.get_distribution("tree-sitter").version
+
+print("tree_sitter version:", version)
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent

@@ -86,6 +86,9 @@ Thumbs.db
 
 # Ignore dotenv
 .env
+venv/
+.venv/
+env/
 
 # Tree-sitter directories
 tree-sitter-javascript/

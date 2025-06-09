@@ -3,6 +3,8 @@
 ## Overview
 This tool performs forensic comparison of two zipped web project folders, analyzing HTML, CSS, JSX/TSX, and Tailwind usage for structural and content similarity. It is designed for plagiarism detection, code review, and template analysis.
 
+---
+
 ## Features
 - **Upload two zip files** (original and modified project folders)
 - **Automatic file matching** using:
@@ -21,6 +23,8 @@ This tool performs forensic comparison of two zipped web project folders, analyz
 - **Robust similarity scoring** with penalization for unmatched files
 - **Detailed JSON and UI reporting**
 
+---
+
 ## How It Works
 
 ### 1. Upload & Extraction
@@ -29,120 +33,125 @@ This tool performs forensic comparison of two zipped web project folders, analyz
 
 ### 2. File Matching Logic
 For each file type (HTML, CSS, JSX/TSX, Tailwind):
-1. **Exact Path-Based Match:**
-   - Files with the same relative path and filename are paired.
-2. **Fuzzy Filename Match:**
-   - Unmatched files are compared by filename similarity (using difflib). Pairs above a threshold are matched.
-3. **Structure/AST-Based Match:**
-   - For HTML/JSX: Compare DOM/AST structure (element count, depth, attributes, etc.).
-   - For CSS: Compare selectors and property sets.
-   - For Tailwind: Extract and compare utility classes from markup files.
-4. **Content Similarity Match (CSS):**
-   - For remaining unmatched CSS files, compare raw content similarity. Pairs above a threshold are matched.
-5. **Contextual Match:**
-   - Folder hierarchy and neighboring file matches are used to boost confidence for remaining unmatched files.
+1. **Exact Path-Based Match:** Files with the same relative path and filename are paired.
+2. **Fuzzy Filename Match:** Unmatched files are compared by filename similarity.
+3. **Structure/AST-Based Match:** For HTML/JSX, compare DOM/AST structure (element count, depth, attributes, etc.).
+4. **Content Similarity Match (CSS):** For unmatched CSS files, compare raw content similarity.
+5. **Contextual Match:** Folder hierarchy and neighboring file matches are used to boost confidence.
 
 ### 3. Per-File-Type Comparison
-- **HTML/JSX:**
-  - Uses AST/DOM structure comparison (element/tag/attribute analysis, fuzzy text, etc.).
-- **CSS:**
-  - For each matched selector, compares property-value pairs with normalization (e.g., `#fff` == `#ffffff`, `10px` == `10.0px`).
-  - Selector similarity = number of matching properties / total unique properties.
-  - Per-selector similarity is reported in the output.
-- **Tailwind:**
-  - Extracts all Tailwind utility classes from markup files.
-  - Computes Jaccard similarity between class sets for each matched file pair.
-  - Parses and compares `tailwind.config.js` files using Node.js, reporting key overlap and config differences.
+- **HTML/JSX/TSX:** Uses AST/DOM structure comparison (element/tag/attribute analysis, fuzzy text, etc.).
+- **CSS:** Compares selectors and property-value pairs with normalization.
+- **Tailwind:** Extracts all Tailwind utility classes from markup files and compares config files.
 
-### 4. Scoring and Penalization
+### 4. TSX/JSX Parsing Approach (NEW)
+- Uses the [tree-sitter](https://tree-sitter.github.io/tree-sitter/) parser for robust, language-aware parsing of JSX/TSX files.
+- **No Node.js required for parsing JSX/TSX!**
+- **No manual .so/.dll/.dylib management for users:**  
+  - The project uses a GitHub Actions workflow to build and commit prebuilt shared libraries (`my-languages.dll`, `.so`, `.dylib`) for all major platforms.
+  - The Python code automatically loads the correct library for your OS:
+    ```python
+    import os, platform
+    from tree_sitter import Language, Parser
+
+    PLATFORM = platform.system().lower()
+    if PLATFORM == 'windows':
+        LIB_PATH = os.path.join(os.path.dirname(__file__), '..', 'prebuilt', 'windows-latest', 'my-languages.dll')
+    elif PLATFORM == 'darwin':
+        LIB_PATH = os.path.join(os.path.dirname(__file__), '..', 'prebuilt', 'macos-latest', 'my-languages.dylib')
+    else:
+        LIB_PATH = os.path.join(os.path.dirname(__file__), '..', 'prebuilt', 'ubuntu-latest', 'my-languages.so')
+
+    LIB_PATH = os.path.abspath(LIB_PATH)
+    TSX_LANGUAGE = Language(LIB_PATH, 'tsx')
+    parser = Parser()
+    parser.set_language(TSX_LANGUAGE)
+    ```
+  - This ensures **cross-platform compatibility** and up-to-date grammar support, as the grammars are rebuilt and committed automatically on every push to main/dev.
+
+### 5. Scoring and Penalization
 - For each file type, the aggregate similarity score is:
   ```
   final_score = (sum of all similarity scores for matched pairs + 0.0 for each unmatched file) / total number of files involved
   ```
-  - **Unmatched files** (present in only one folder) are penalized as 0.0 in the score.
-  - **Total number of files** = number of original files + number of modified files - number of unique matched pairs.
-- **CSS selector similarity:**
-  - If selector similarity >= 0.9: counted as exact match.
-  - If 0.3 <= similarity < 0.9: partial credit (actual similarity fraction).
-  - If < 0.3: treated as different.
-- **Tailwind class/config similarity:**
-  - Jaccard similarity is used for class sets and config keys.
-  - Highly divergent Tailwind usage/configs are penalized in the overall score.
-- **Dynamic Weighted Overall Score:**
-  - The overall similarity is a weighted average of the present categories (HTML, CSS, JSX, Tailwind):
-    - Default weights: HTML 0.4, CSS 0.2, JSX 0.2, Tailwind 0.2
-    - **Only categories with at least one file present in either folder are included.**
-    - Weights are normalized so the sum is 1.0 for the present categories.
-    - Example: If only HTML and CSS are present, weights become HTML 0.67, CSS 0.33.
-- **Overall score** is the average of all per-type scores, weighted by the number of files and normalized weights.
+  - **Unmatched files** are penalized as 0.0 in the score.
+  - **Dynamic Weighted Overall Score:** The overall similarity is a weighted average of the present categories (HTML, CSS, JSX, Tailwind).
 
-### 5. Output & Reporting
-- The tool returns a detailed JSON report including:
-  - Per-type summary (HTML, CSS, JSX, Tailwind):
-    - Number of files compared, matched, unmatched
-    - List of matched pairs with similarity scores and match type
-    - List of unmatched files (original and modified)
-    - Aggregate similarity score (with penalization)
-    - Per-selector similarity details for CSS
-    - Per-file and config similarity details for Tailwind
-  - Overall similarity score
-  - Prediction verdicts (overall and per-type)
-- The UI displays:
-  - Overall and per-type similarity scores
-  - Charts and breakdowns for each file type (including Tailwind)
-  - Prediction verdicts
-  - Lists of unmatched files
-  - Tailwind class and config similarity breakdowns
+### 6. Output & Reporting
+- The tool returns a detailed JSON report including per-type summaries, file matches, and overall similarity verdicts.
+- The UI displays scores, charts, unmatched files, and Tailwind breakdowns.
 
-## Example Scoring
-If you have 2 matched CSS files (similarity 0.5 and 0.0) and 2 unmatched files, the final score is:
-```
-final_score = (0.5 + 0.0 + 0.0 + 0.0) / 4 = 0.125
-```
+---
 
 ## Usage
-- Run the web app and upload two zip files via the UI.
-- View the detailed similarity report and download the JSON report for further analysis.
+
+1. **Install dependencies:**
+   ```sh
+   python -m venv venv
+   venv\Scripts\activate  # On Windows
+   source venv/bin/activate  # On macOS/Linux
+   pip install -r requirements.txt
+   ```
+2. **Run the web app:**
+   ```sh
+   python web/app.py
+   ```
+3. **Upload two zip files** via the UI and view/download the similarity report.
+
+---
 
 ## Requirements
-- Python 3.8+
+- Python 3.8–3.11
 - Flask
 - tinycss2
 - BeautifulSoup4
-- Node.js (for Tailwind config parsing)
+- tree-sitter==0.20.1 (or compatible)
+- Prebuilt shared libraries in `prebuilt/` (auto-managed by CI)
+- Node.js (only for Tailwind config parsing)
 - (See requirements.txt for full list)
 
-## Notes
-- Unmatched files are penalized in the final similarity score.
-- All normalization and matching logic is robust to whitespace, formatting, and minor code changes.
-- Tailwind analysis is extensible; more UI frameworks can be added easily.
-
 ---
-For more details, see the code and comments in `core/file_matcher.py`, `core/css_style_checker.py`, `core/ui_framework_analyzer.py`, and `core/tailwind_analyzer.py`.
 
 ## Project Structure
 
 ```
 jsx-forensic-tool/
 ├── core/
-│   ├── __init__.py
-│   ├── forensic_analyzer.py   # Main interface
-│   ├── html_parser.py         # HTML parsing logic
-│   ├── structure_comparator.py # Comparison logic
-│   ├── tailwind_analyzer.py   # Tailwind utility class/config analysis
-│   └── ui_framework_analyzer.py # UI framework analyzer manager (extensible)
+│   ├── jsx_treesitter_parser.py   # TSX/JSX parsing logic (tree-sitter, OS-based)
+│   └── ...
+├── prebuilt/
+│   ├── windows-latest/my-languages.dll
+│   ├── macos-latest/my-languages.dylib
+│   └── ubuntu-latest/my-languages.so
 ├── web/
-│   ├── app.py                 # Flask web application
-│   └── templates/
-│       └── index.html         # Web interface template
-├── tests/
-│   ├── fixtures/              # Test files
-│   ├── test_analyzer.py
-│   ├── test_html_parser.py
-│   └── test_comparator.py
-├── requirements.txt           # Python dependencies
-└── README.md                 # This file
+│   └── app.py
+├── requirements.txt
+└── README.md
 ```
+
+---
+
+## CI/CD and Prebuilt Binaries
+- **Continuous Integration (CI):**
+  - On every push to `main` or `dev`, GitHub Actions automatically builds the latest tree-sitter grammars (including TSX/JSX) and commits the updated `.so`, `.dll`, and `.dylib` files to the `prebuilt/` directory.
+  - This ensures all users always get the latest grammar support without manual compilation.
+- **No need to build locally:**
+  - Just pull the latest code and the correct binary for your OS will be used automatically.
+
+---
+
+## FAQ
+
+**Q: What about `jsx_ast.json` and `jsx_ast.txt`?**
+- These are not used by the main application. They are likely debug or intermediate files and are ignored by `.gitignore`.
+
+**Q: Can I add more grammars?**
+- Yes! Update the GitHub Actions workflow to include additional grammars when building the shared library.
+
+**Q: What Python versions are supported?**
+- Python 3.8–3.11 (due to binary compatibility of prebuilt grammars).
+
+---
 
 ## Contributing
 
@@ -152,14 +161,18 @@ jsx-forensic-tool/
 4. Push to the branch
 5. Create a Pull Request
 
+---
+
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License
+
+---
 
 ## Acknowledgments
 
 - BeautifulSoup4 for HTML parsing
-- Tree-sitter for JSX parsing
+- Tree-sitter for JSX/TSX parsing
 - Flask for web interface
 - Chart.js for visualizations
 - TailwindCSS for styling 

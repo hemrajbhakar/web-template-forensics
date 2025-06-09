@@ -110,8 +110,9 @@ class TailwindAnalyzer:
 
     def parse_config(self, config_path: str) -> Dict[str, Any]:
         """Parse tailwind.config.js using Node.js and return as dict."""
+        node_script_path = config_path.replace('\\', '\\\\')
         node_script = f"""
-        const config = require('{config_path.replace('\\', '\\\\')}');
+        const config = require('{node_script_path}');
         console.log(JSON.stringify(config));
         """
         try:
