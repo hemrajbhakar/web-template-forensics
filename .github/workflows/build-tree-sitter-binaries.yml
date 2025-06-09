@@ -2,7 +2,7 @@ name: Build Tree-sitter Parsers
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     tags: ['v*']
 
 jobs:
@@ -21,24 +21,35 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
       - name: Install tree-sitter
-        run: |
-          pip install tree_sitter
+        run: pip install tree_sitter
 
       - name: Clone grammars
         run: |
           git clone https://github.com/tree-sitter/tree-sitter-javascript.git
           git clone https://github.com/tree-sitter/tree-sitter-typescript.git
 
-      - name: Install npm if needed (for grammars with build steps)
-        if: matrix.os != 'windows-latest'
-        run: |
-          sudo apt-get install -y npm || true
-
-      - name: Install npm packages for grammar (optional)
+      - name: Install npm packages for grammars
         run: |
           cd tree-sitter-javascript && npm install || true
           cd ../tree-sitter-typescript/typescript && npm install || true
+        shell: bash
+
+      - name: Determine file extension
+        id: ext
+        run: |
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            echo "EXT=dll" >> $GITHUB_OUTPUT
+          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            echo "EXT=dylib" >> $GITHUB_OUTPUT
+          else
+            echo "EXT=so" >> $GITHUB_OUTPUT
+          fi
         shell: bash
 
       - name: Build language library
@@ -47,18 +58,19 @@ jobs:
           python -c "
 from tree_sitter import Language
 Language.build_library(
-  'build/my-languages.${{ matrix.os == 'windows-latest' && 'dll' || matrix.os == 'macos-latest' && 'dylib' || 'so' }}',
+  'build/my-languages.${{ steps.ext.outputs.EXT }}',
   ['tree-sitter-javascript', 'tree-sitter-typescript/typescript']
 )
 "
-      - name: Move and rename output to prebuilt folder
+
+      - name: Move output to prebuilt folder
         run: |
           mkdir -p prebuilt/${{ matrix.os }}
           cp build/my-languages.* prebuilt/${{ matrix.os }}/
         shell: bash
 
-      - name: Commit and push binaries
+      - name: Commit and push prebuilt binaries
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "🤖 Add prebuilt parser binaries for ${{ matrix.os }}"
-          file_pattern: prebuilt/*
+          file_pattern: prebuilt/**
