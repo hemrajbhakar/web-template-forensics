@@ -151,8 +151,6 @@ jsx-forensic-tool/
 
 ## FAQ
 
-**Q: What about `jsx_ast.json` and `jsx_ast.txt`?**
-- These are not used by the main application. They are likely debug or intermediate files and are ignored by `.gitignore`.
 
 **Q: Can I add more grammars?**
 - Yes! Update the GitHub Actions workflow to include additional grammars when building the shared library.
