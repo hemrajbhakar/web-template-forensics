@@ -76,7 +76,7 @@ For each file type (HTML, CSS, JSX/TSX, Tailwind):
     parser = Parser()
     parser.set_language(TSX_LANGUAGE)
     ```
-  - This ensures **cross-platform compatibility** and up-to-date grammar support, as the grammars are rebuilt and committed automatically on every push to main branch.
+  - This ensures **cross-platform compatibility** and up-to-date grammar support, as the grammars are rebuilt and committed automatically on every **tag push** (e.g., v1.0.0) or when manually triggered.
 
 ### 5. Scoring and Penalization
 - For each file type, the aggregate similarity score is:
@@ -142,8 +142,8 @@ jsx-forensic-tool/
 
 ## CI/CD and Prebuilt Binaries
 - **Continuous Integration (CI):**
-  - On every push to `main` or `dev`, GitHub Actions automatically builds the latest tree-sitter grammars (including TSX/JSX) and commits the updated `.so`, `.dll`, and `.dylib` files to the `prebuilt/` directory.
-  - This ensures all users always get the latest grammar support without manual compilation.
+  - On every **tag push** (e.g., v1.0.0) or when manually triggered, GitHub Actions automatically builds the latest tree-sitter grammars (including TSX/JSX) and commits the updated `.so`, `.dll`, and `.dylib` files to the `prebuilt/` directory.
+  - This ensures all users always get the latest grammar support for each release, without manual compilation.
 - **No need to build locally:**
   - Just pull the latest code and the correct binary for your OS will be used automatically.
 
