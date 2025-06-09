@@ -83,11 +83,11 @@ jobs:
           EOF
         shell: bash
 
-      - name: Check tree-sitter version and API
+      - name: Check tree-sitter installation
         run: |
-          python -c "import tree_sitter; print(f'tree-sitter version: {tree_sitter.__version__}')"
-          python -c "import tree_sitter; print('tree_sitter module contents:', dir(tree_sitter))" || true
-          python -c "from tree_sitter import Language; print('Language class methods:', [m for m in dir(Language) if not m.startswith('_')])" || true
+          python -c "import tree_sitter; print('tree_sitter module imported successfully')"
+          python -c "from tree_sitter import Language; print('Language class available:', 'build_library' in dir(Language))"
+          pip show tree-sitter
         shell: bash
 
       - name: Build language library
