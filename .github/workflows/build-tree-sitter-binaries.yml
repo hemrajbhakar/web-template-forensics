@@ -178,37 +178,56 @@ jobs:
           rm -rf prebuilt
           mkdir -p prebuilt
           
-          # Copy artifacts to final structure
-          for platform in ubuntu-latest windows-latest macos-latest; do
-            if [ -d "artifacts/parser-$platform" ]; then
-              mkdir -p "prebuilt/$platform"
-              cp -r artifacts/parser-$platform/* "prebuilt/$platform/"
-            fi
-          done
+          # Create all platform directories explicitly
+          mkdir -p prebuilt/ubuntu-latest
+          mkdir -p prebuilt/windows-latest
+          mkdir -p prebuilt/macos-latest
           
-          # Final verification - look for actual filenames
+          # Copy artifacts to final structure with verification
+          echo "Copying Ubuntu artifacts..."
+          cp artifacts/parser-ubuntu-latest/* prebuilt/ubuntu-latest/
+          ls -la prebuilt/ubuntu-latest/
+          
+          echo "Copying Windows artifacts..."
+          cp artifacts/parser-windows-latest/* prebuilt/windows-latest/
+          ls -la prebuilt/windows-latest/
+          
+          echo "Copying macOS artifacts..."
+          cp artifacts/parser-macos-latest/* prebuilt/macos-latest/
+          ls -la prebuilt/macos-latest/
+          
+          # Final verification
           echo ""
-          echo "Files to be committed:"
-          find prebuilt -type f -name "my-languages.*" | sort
+          echo "Complete prebuilt directory structure:"
+          tree prebuilt || find prebuilt -type f | sort
           
-          # Count files - look for my-languages.* files
-          file_count=$(find prebuilt -type f -name "my-languages.*" | wc -l)
-          if [ "$file_count" -ne 3 ]; then
-            echo "❌ ERROR: Expected 3 library files, found $file_count"
-            echo "Looking for pattern 'my-languages.*' in prebuilt directory:"
-            find prebuilt -type f | sort
-            exit 1
-          fi
-          echo "✅ All 3 platform libraries found and ready to commit"
+          # Verify all files exist
+          test -f prebuilt/ubuntu-latest/my-languages.so || (echo "❌ Ubuntu file missing!" && exit 1)
+          test -f prebuilt/windows-latest/my-languages.dll || (echo "❌ Windows file missing!" && exit 1)
+          test -f prebuilt/macos-latest/my-languages.dylib || (echo "❌ macOS file missing!" && exit 1)
+          
+          echo "✅ All 3 platform libraries verified and ready to commit"
 
       - name: Commit and push binaries
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "🤖 Add prebuilt parser binaries for all platforms"
-          file_pattern: prebuilt/**/*
-          commit_user_name: github-actions[bot]
-          commit_user_email: github-actions[bot]@users.noreply.github.com
-          commit_author: GitHub Actions <github-actions[bot]@users.noreply.github.com>
+        run: |
+          # Configure git
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Add all prebuilt files
+          git add -A prebuilt/
+          
+          # Show what will be committed
+          echo "Files staged for commit:"
+          git status --porcelain
+          
+          # Commit if there are changes
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "🤖 Add prebuilt parser binaries for all platforms"
+            git push
+          fi
 
   # Optional: Create release artifacts when tagging
   create-release:
