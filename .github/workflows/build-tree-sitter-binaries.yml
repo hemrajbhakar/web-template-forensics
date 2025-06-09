@@ -4,6 +4,7 @@ on:
   push:
     branches: [dev]
     tags: ['v*']
+  workflow_dispatch:  # Added for manual testing
 
 jobs:
   build-parsers:
@@ -22,7 +23,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install tree_sitter
+        run: |
+          pip install --upgrade pip
+          pip install "tree-sitter==0.20.1"  # Pin to known working version
 
       - name: Clone grammars
         run: |
@@ -54,17 +57,37 @@ jobs:
       - name: Create build script
         run: |
           cat > build/build_parsers.py << 'EOF'
-          from tree_sitter import Language
           import os
+          import sys
           
           # Get the file extension from environment
           ext = os.environ.get('FILE_EXT', 'so')
+          output_path = f"build/my-languages.{ext}"
           
-          Language.build_library(
-            f"build/my-languages.{ext}",
-            ["tree-sitter-javascript", "tree-sitter-typescript/typescript"]
-          )
+          try:
+              from tree_sitter import Language
+              # Build the library
+              Language.build_library(
+                  output_path,
+                  [
+                      "tree-sitter-javascript",
+                      "tree-sitter-typescript/typescript"
+                  ]
+              )
+              print(f"Successfully built: {output_path}")
+          except Exception as e:
+              print(f"ERROR building library: {e}")
+              import traceback
+              traceback.print_exc()
+              sys.exit(1)
           EOF
+        shell: bash
+
+      - name: Check tree-sitter version and API
+        run: |
+          python -c "import tree_sitter; print(f'tree-sitter version: {tree_sitter.__version__}')"
+          python -c "import tree_sitter; print('tree_sitter module contents:', dir(tree_sitter))" || true
+          python -c "from tree_sitter import Language; print('Language class methods:', [m for m in dir(Language) if not m.startswith('_')])" || true
         shell: bash
 
       - name: Build language library
