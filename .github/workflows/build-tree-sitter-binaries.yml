@@ -40,17 +40,16 @@ jobs:
           cd ../tree-sitter-typescript/typescript && npm install || true
         shell: bash
 
-      - name: Determine file extension
+      - name: Set file extension
         id: ext
         run: |
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            echo "EXT=dll" >> $GITHUB_OUTPUT
+            echo "ext=dll" >> $GITHUB_OUTPUT
           elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            echo "EXT=dylib" >> $GITHUB_OUTPUT
+            echo "ext=dylib" >> $GITHUB_OUTPUT
           else
-            echo "EXT=so" >> $GITHUB_OUTPUT
+            echo "ext=so" >> $GITHUB_OUTPUT
           fi
-        shell: bash
 
       - name: Build language library
         run: |
@@ -58,7 +57,7 @@ jobs:
           python -c "
 from tree_sitter import Language
 Language.build_library(
-  'build/my-languages.${{ steps.ext.outputs.EXT }}',
+  'build/my-languages.${{ steps.ext.outputs.ext }}',
   ['tree-sitter-javascript', 'tree-sitter-typescript/typescript']
 )
 "
