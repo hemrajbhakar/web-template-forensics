@@ -71,7 +71,8 @@ jobs:
                   output_path,
                   [
                       "tree-sitter-javascript",
-                      "tree-sitter-typescript/typescript"
+                      "tree-sitter-typescript/typescript",
+                      "tree-sitter-typescript/tsx"
                   ]
               )
               print(f"Successfully built: {output_path}")
