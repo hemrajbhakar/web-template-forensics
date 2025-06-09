@@ -1,5 +1,14 @@
 # Forensic Template Comparison Tool
 
+![version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+
+## Author
+**Hemraj Bhakar**  \
+_Full Stack Web Developer_
+
+- [GitHub Profile](https://github.com/hemrajbhakar)
+- [Portfolio Website](https://hemrajbhakar.site)
+
 ## Overview
 This tool performs forensic comparison of two zipped web project folders, analyzing HTML, CSS, JSX/TSX, and Tailwind usage for structural and content similarity. It is designed for plagiarism detection, code review, and template analysis.
 
