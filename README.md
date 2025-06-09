@@ -76,7 +76,7 @@ For each file type (HTML, CSS, JSX/TSX, Tailwind):
     parser = Parser()
     parser.set_language(TSX_LANGUAGE)
     ```
-  - This ensures **cross-platform compatibility** and up-to-date grammar support, as the grammars are rebuilt and committed automatically on every push to main/dev.
+  - This ensures **cross-platform compatibility** and up-to-date grammar support, as the grammars are rebuilt and committed automatically on every push to main branch.
 
 ### 5. Scoring and Penalization
 - For each file type, the aggregate similarity score is:
