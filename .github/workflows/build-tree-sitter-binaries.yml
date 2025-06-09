@@ -2,7 +2,7 @@ name: Build Tree-sitter Parsers
 
 on:
   push:
-    branches: [main, dev]
+    branches: [dev]
     tags: ['v*']
 
 jobs:
@@ -21,11 +21,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
       - name: Install tree-sitter
         run: pip install tree_sitter
 
@@ -34,42 +29,47 @@ jobs:
           git clone https://github.com/tree-sitter/tree-sitter-javascript.git
           git clone https://github.com/tree-sitter/tree-sitter-typescript.git
 
-      - name: Install npm packages for grammars
+      - name: Install npm (Linux only)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install -y npm
+
+      - name: Install grammar dependencies
         run: |
           cd tree-sitter-javascript && npm install || true
           cd ../tree-sitter-typescript/typescript && npm install || true
         shell: bash
 
-      - name: Set file extension
+      - name: Determine extension
         id: ext
         run: |
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            echo "ext=dll" >> $GITHUB_OUTPUT
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            echo "ext=so" >> $GITHUB_OUTPUT
           elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
             echo "ext=dylib" >> $GITHUB_OUTPUT
           else
-            echo "ext=so" >> $GITHUB_OUTPUT
+            echo "ext=dll" >> $GITHUB_OUTPUT
           fi
+        shell: bash
 
       - name: Build language library
         run: |
           mkdir -p build
-          python -c "
+          cat > build/build_parsers.py <<EOF
 from tree_sitter import Language
 Language.build_library(
-  'build/my-languages.${{ steps.ext.outputs.ext }}',
-  ['tree-sitter-javascript', 'tree-sitter-typescript/typescript']
+  "build/my-languages.${{ steps.ext.outputs.ext }}",
+  ["tree-sitter-javascript", "tree-sitter-typescript/typescript"]
 )
-"
+EOF
+          python build/build_parsers.py
 
       - name: Move output to prebuilt folder
         run: |
           mkdir -p prebuilt/${{ matrix.os }}
           cp build/my-languages.* prebuilt/${{ matrix.os }}/
-        shell: bash
 
-      - name: Commit and push prebuilt binaries
+      - name: Commit and push binaries
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "🤖 Add prebuilt parser binaries for ${{ matrix.os }}"
-          file_pattern: prebuilt/**
+          file_pattern: prebuilt/*
