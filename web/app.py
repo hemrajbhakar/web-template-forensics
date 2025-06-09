@@ -16,7 +16,7 @@ except ImportError:
     import pkg_resources
     version = pkg_resources.get_distribution("tree-sitter").version
 
-print("tree_sitter version:", version)
+print("Python version:", sys.version)
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
@@ -411,5 +411,7 @@ def download_report():
         )
     return jsonify({'error': 'No report available'}), 404
 
+
 if __name__ == '__main__':
-    app.run(debug=True) 
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
