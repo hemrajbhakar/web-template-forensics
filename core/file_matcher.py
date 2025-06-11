@@ -491,6 +491,11 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
             'aggregate_score': round(agg_score, 3)
         }
         predictions[filetype] = get_prediction(agg_score)
+        # Filter out next-env.d.ts from matched_pairs and unmatched lists for JS
+        if filetype == 'js':
+            matched_pairs = [pair for pair in matched_pairs if not (pair['original'].endswith('next-env.d.ts') or pair['modified'].endswith('next-env.d.ts'))]
+            unmatched_files[filetype]['original'] = [f for f in unmatched_files[filetype]['original'] if not f.endswith('next-env.d.ts')]
+            unmatched_files[filetype]['modified'] = [f for f in unmatched_files[filetype]['modified'] if not f.endswith('next-env.d.ts')]
     print('--- [LOG] Aggregation and scoring done ---')
     # --- Aggregation: file-count-based weighting ---
     similarities = []
@@ -567,14 +572,9 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
         'shared_classes': list(shared_classes),
         'only_in_original': list(only_in_original),
         'only_in_user': list(only_in_user),
-        'per_file_results': tailwind_results,
         'change_impact': change_impact_all
     }
-    # Final debug prints for tracing
-    print("DEBUG: Final tailwind_similarity =", tailwind_similarity)
-    print("DEBUG: tailwind_scores =", tailwind_scores)
-    print("DEBUG: results['tailwind'] =", results['tailwind'])
-    print('--- [LOG] Tailwind aggregation done ---')
+
     def aggregate_html_summary(pairs):
         total = matching = different = missing = extra = 0
         for pair in pairs:
@@ -717,5 +717,8 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
             'missing_functions': 0,
             'extra_functions': 0
         }
-    print('[DEBUG] Final results before return:', results)
+    
+    # Remove per_file_results from tailwind before returning results
+    if 'tailwind' in results and 'per_file_results' in results['tailwind']:
+        del results['tailwind']['per_file_results']
     return results 

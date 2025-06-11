@@ -50,134 +50,125 @@ class JSLogicAnalyzer:
             raise
 
     def parse_file(self, file_path: str) -> Dict:
-        """Parse JS/TS file using tree-sitter and return normalized AST."""
+        """Parse JS/TS file using tree-sitter and return normalized AST and call graph."""
         try:
             logger.debug(f"Parsing file: {file_path}")
             with open(file_path, 'r', encoding='utf-8') as f:
                 code = f.read()
-            
-            # Choose parser based on file extension
             ext = os.path.splitext(file_path)[1].lower()
             parser = self.ts_parser if ext == '.ts' else self.js_parser
-            
             tree = parser.parse(bytes(code, 'utf-8'))
             if not tree:
                 logger.warning(f"Parser returned no tree for file: {file_path}")
                 return {}
-                
-            result = self._normalize_ast(tree.root_node, code)
+            # Extract normalized AST and call graph
+            ast, call_graph = self._normalize_ast_with_call_graph(tree.root_node, code)
             logger.debug(f"Successfully parsed file: {file_path}")
-            return result
+            return {'ast': ast, 'call_graph': call_graph}
         except Exception as e:
             logger.error(f"Error parsing file {file_path}: {str(e)}", exc_info=True)
             return {}
 
-    def _normalize_ast(self, node: Any, code: str) -> Dict:
-        """Convert AST node to normalized format, stripping unnecessary details."""
+    def _normalize_ast_with_call_graph(self, node: Any, code: str, id_map=None, lit_map=None, id_counter=None, lit_counter=None, call_graph=None, function_stack=None, anon_func_counter=None):
+        """Normalize AST and extract call graph (function -> called functions)."""
+        if id_map is None:
+            id_map = {}
+        if lit_map is None:
+            lit_map = {}
+        if id_counter is None:
+            id_counter = {'id': 0}
+        if lit_counter is None:
+            lit_counter = {'lit': 0}
+        if call_graph is None:
+            call_graph = {}
+        if function_stack is None:
+            function_stack = []
+        if anon_func_counter is None:
+            anon_func_counter = [0]
         if not node:
-            return {}
-            
-        result = {
-            'type': node.type,
-            'children': []
-        }
-        
-        # Handle different node types
-        if node.type in ('function_declaration', 'method_definition'):
-            # Normalize function/method declarations
-            result['name'] = self._get_node_name(node)
-            result['parameters'] = self._normalize_parameters(node)
-            result['body'] = self._normalize_body(node, code)
-            
-        elif node.type in ('class_declaration', 'class_expression'):
-            # Normalize class declarations
-            result['name'] = self._get_node_name(node)
-            result['methods'] = [
-                self._normalize_ast(child, code)
-                for child in node.children
-                if child.type == 'method_definition'
-            ]
-            
-        elif node.type in ('import_declaration', 'export_declaration'):
-            # Normalize imports/exports
-            result['source'] = self._get_import_source(node)
-            result['specifiers'] = self._normalize_import_specifiers(node)
-            
-        elif node.type in ('for_statement', 'while_statement', 'if_statement'):
-            # Normalize control flow structures
-            result['condition'] = self._normalize_condition(node)
-            result['body'] = self._normalize_body(node, code)
-            
-        else:
-            # For other nodes, just include their children
-            result['children'] = [
-                self._normalize_ast(child, code)
-                for child in node.children
-            ]
-            
-        return result
-
-    def _get_node_name(self, node: Any) -> str:
-        """Extract normalized name from a node."""
-        name_node = node.child_by_field_name('name')
-        if name_node:
-            return name_node.text.decode('utf-8')
-        return ''
-
-    def _normalize_parameters(self, node: Any) -> List[str]:
-        """Normalize function parameters to generic names."""
-        params = []
-        params_node = node.child_by_field_name('parameters')
-        if params_node:
-            for i, param in enumerate(params_node.children):
-                if param.type == 'identifier':
-                    params.append(f'param{i}')
-        return params
-
-    def _normalize_body(self, node: Any, code: str) -> Dict:
-        """Normalize function/control flow body."""
-        body_node = node.child_by_field_name('body')
-        if body_node:
-            return self._normalize_ast(body_node, code)
-        return {}
-
-    def _get_import_source(self, node: Any) -> str:
-        """Extract import/export source."""
-        source_node = node.child_by_field_name('source')
-        if source_node:
-            return source_node.text.decode('utf-8').strip('"\'')
-        return ''
-
-    def _normalize_import_specifiers(self, node: Any) -> List[Dict]:
-        """Normalize import/export specifiers."""
-        specifiers = []
+            return {}, call_graph
+        # Normalize identifiers
+        if node.type == 'identifier':
+            name = node.text.decode('utf-8')
+            if name not in id_map:
+                id_map[name] = f'id{len(id_map)}'
+            return {'type': 'identifier', 'name': id_map[name]}, call_graph
+        # Normalize literals
+        if node.type in ('string', 'string_literal', 'number', 'number_literal', 'true', 'false', 'boolean'):
+            lit_key = node.text.decode('utf-8')
+            if lit_key not in lit_map:
+                lit_map[lit_key] = f'lit{len(lit_map)}'
+            return {'type': node.type, 'value': lit_map[lit_key]}, call_graph
+        # Function definitions
+        if node.type in ('function_declaration', 'function_expression', 'arrow_function', 'method_definition'):
+            func_name = self._get_node_name(node) or f"anon_func_{anon_func_counter[0]}"
+            if not self._get_node_name(node):
+                anon_func_counter[0] += 1
+            function_stack.append(func_name)
+            call_graph.setdefault(func_name, set())
+            children = []
+            for child in node.children:
+                norm_child, call_graph = self._normalize_ast_with_call_graph(child, code, id_map, lit_map, id_counter, lit_counter, call_graph, function_stack, anon_func_counter)
+                children.append(norm_child)
+            function_stack.pop()
+            return {'type': node.type, 'name': func_name, 'children': children}, call_graph
+        # Call expressions
+        if node.type == 'call_expression':
+            callee = self._get_callee_name(node, id_map)
+            if function_stack and callee:
+                call_graph[function_stack[-1]].add(callee)
+            children = []
+            for child in node.children:
+                norm_child, call_graph = self._normalize_ast_with_call_graph(child, code, id_map, lit_map, id_counter, lit_counter, call_graph, function_stack, anon_func_counter)
+                children.append(norm_child)
+            return {'type': node.type, 'callee': callee, 'children': children}, call_graph
+        # Default: recurse
+        children = []
         for child in node.children:
-            if child.type in ('import_specifier', 'export_specifier'):
-                spec = {
-                    'type': child.type,
-                    'name': self._get_node_name(child)
-                }
-                specifiers.append(spec)
-        return specifiers
+            norm_child, call_graph = self._normalize_ast_with_call_graph(child, code, id_map, lit_map, id_counter, lit_counter, call_graph, function_stack, anon_func_counter)
+            children.append(norm_child)
+        return {
+            'type': node.type,
+            'children': children,
+            'text': code[node.start_byte:node.end_byte] if node.child_count == 0 else None
+        }, call_graph
 
-    def _normalize_condition(self, node: Any) -> Dict:
-        """Normalize control flow conditions."""
-        condition_node = node.child_by_field_name('condition')
-        if condition_node:
-            return self._normalize_ast(condition_node, '')
-        return {}
+    def _get_callee_name(self, node: Any, id_map) -> str:
+        for child in node.children:
+            if child.type == 'identifier':
+                return id_map.get(child.text.decode('utf-8'), child.text.decode('utf-8'))
+            if child.type == 'member_expression':
+                prop = child.child_by_field_name('property')
+                if prop:
+                    return id_map.get(prop.text.decode('utf-8'), prop.text.decode('utf-8'))
+        return None
+
+    def compare_call_graphs(self, cg1: dict, cg2: dict) -> float:
+        """Compare two call graphs using Jaccard similarity of edges."""
+        edges1 = set((caller, callee) for caller, callees in cg1.items() for callee in callees)
+        edges2 = set((caller, callee) for caller, callees in cg2.items() for callee in callees)
+        if not edges1 and not edges2:
+            return 1.0
+        if not edges1 or not edges2:
+            return 0.0
+        intersection = len(edges1 & edges2)
+        union = len(edges1 | edges2)
+        return intersection / union if union else 0.0
 
     def compare_files(self, file1: str, file2: str) -> Dict:
-        """Compare two JS/TS files and return similarity analysis, including function match counts."""
-        tree1 = self.parse_file(file1)
-        tree2 = self.parse_file(file2)
-        
+        """Compare two JS/TS files and return similarity analysis, including function match counts and call graph similarity."""
+        parsed1 = self.parse_file(file1)
+        parsed2 = self.parse_file(file2)
+        tree1 = parsed1.get('ast', {})
+        tree2 = parsed2.get('ast', {})
+        call_graph1 = parsed1.get('call_graph', {})
+        call_graph2 = parsed2.get('call_graph', {})
         # Calculate various similarity metrics
         function_similarity = self._compare_functions(tree1, tree2)
         import_similarity = self._compare_imports(tree1, tree2)
         class_similarity = self._compare_classes(tree1, tree2)
         control_flow_similarity = self._compare_control_flow(tree1, tree2)
-
+        call_graph_similarity = self.compare_call_graphs(call_graph1, call_graph2)
         # Function-level match counts
         functions1 = self._extract_functions(tree1)
         functions2 = self._extract_functions(tree2)
@@ -186,7 +177,6 @@ class JSLogicAnalyzer:
         different_functions = 0
         missing_functions = 0
         extra_functions = 0
-        # For each function in file1, find best match in file2
         matched2 = set()
         for func1 in functions1:
             best_score = 0.0
@@ -208,14 +198,14 @@ class JSLogicAnalyzer:
                     matched2.add(best_idx)
             else:
                 missing_functions += 1
-        # Any functions in file2 not matched
         extra_functions = len(functions2) - len(matched2)
-        # Calculate overall similarity score
+        # Calculate overall similarity score (add call graph similarity)
         overall_similarity = (
-            function_similarity * 0.4 +
-            import_similarity * 0.2 +
-            class_similarity * 0.2 +
-            control_flow_similarity * 0.2
+            function_similarity * 0.35 +
+            import_similarity * 0.15 +
+            class_similarity * 0.15 +
+            control_flow_similarity * 0.15 +
+            call_graph_similarity * 0.2
         )
         return {
             'similarity': round(overall_similarity, 2),
@@ -224,6 +214,7 @@ class JSLogicAnalyzer:
                 'import_similarity': round(import_similarity, 2),
                 'class_similarity': round(class_similarity, 2),
                 'control_flow_similarity': round(control_flow_similarity, 2),
+                'call_graph_similarity': round(call_graph_similarity, 2),
                 'total_functions': total_functions,
                 'matching_functions': matching_functions,
                 'different_functions': different_functions,
@@ -263,13 +254,11 @@ class JSLogicAnalyzer:
     def _extract_functions(self, tree: Dict) -> List[Dict]:
         """Extract all function declarations from AST."""
         functions = []
-        
         def traverse(node):
             if node.get('type') in ('function_declaration', 'method_definition'):
                 functions.append(node)
             for child in node.get('children', []):
                 traverse(child)
-                
         traverse(tree)
         return functions
 
@@ -286,16 +275,46 @@ class JSLogicAnalyzer:
             
         return 1.0  # Full match if names and parameter counts match
 
+    def _tree_similarity(self, node1: Dict, node2: Dict) -> float:
+        """Recursively compare two AST subtrees and return a similarity score between 0 and 1."""
+        if not node1 and not node2:
+            return 1.0
+        if not node1 or not node2:
+            return 0.0
+        if node1.get('type') != node2.get('type'):
+            return 0.0
+        # Compare children recursively
+        children1 = node1.get('children', [])
+        children2 = node2.get('children', [])
+        if not children1 and not children2:
+            # Compare leaf node values if present
+            val1 = node1.get('name') or node1.get('value') or node1.get('text')
+            val2 = node2.get('name') or node2.get('value') or node2.get('text')
+            return 1.0 if val1 == val2 else 0.8 if (val1 is None or val2 is None) else 0.0
+        # Pairwise match children (greedy best match)
+        matched = 0
+        used2 = set()
+        for c1 in children1:
+            best = 0.0
+            best_j = -1
+            for j, c2 in enumerate(children2):
+                if j in used2:
+                    continue
+                sim = self._tree_similarity(c1, c2)
+                if sim > best:
+                    best = sim
+                    best_j = j
+            if best_j >= 0:
+                used2.add(best_j)
+            matched += best
+        total = max(len(children1), len(children2))
+        return matched / total if total else 1.0
+
     def _compare_function_bodies(self, func1: Dict, func2: Dict) -> float:
-        """Compare function bodies using tree similarity."""
+        """Compare function bodies using tree-based similarity."""
         body1 = func1.get('body', {})
         body2 = func2.get('body', {})
-        
-        # Convert bodies to string representation for comparison
-        str1 = str(body1)
-        str2 = str(body2)
-        
-        return difflib.SequenceMatcher(None, str1, str2).ratio()
+        return self._tree_similarity(body1, body2)
 
     def _compare_imports(self, tree1: Dict, tree2: Dict) -> float:
         """Compare import/export statements between two ASTs."""
@@ -467,4 +486,24 @@ class JSLogicAnalyzer:
         """Compare control flow conditions."""
         str1 = str(cond1)
         str2 = str(cond2)
-        return difflib.SequenceMatcher(None, str1, str2).ratio() 
+        return difflib.SequenceMatcher(None, str1, str2).ratio()
+
+    def _get_node_name(self, node):
+        """Robustly extract the name of a function or method node from a tree-sitter node."""
+        # Try to get the name field (works for function_declaration, method_definition)
+        name_node = getattr(node, 'child_by_field_name', lambda x: None)('name')
+        if name_node:
+            return name_node.text.decode('utf-8')
+        # For function expressions or arrow functions assigned to a variable: look for parent variable declarator
+        parent = getattr(node, 'parent', None)
+        if parent and hasattr(parent, 'type') and parent.type == 'variable_declarator':
+            id_node = parent.child_by_field_name('name')
+            if id_node:
+                return id_node.text.decode('utf-8')
+        # For assignment expressions (e.g., foo = function() {})
+        if parent and hasattr(parent, 'type') and parent.type == 'assignment_expression':
+            left = parent.child_by_field_name('left')
+            if left and left.type == 'identifier':
+                return left.text.decode('utf-8')
+        # Fallback: None
+        return None 

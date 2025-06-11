@@ -88,6 +88,8 @@ def aggregate_css_summary(pairs):
 
 def aggregate_js_summary(pairs):
     total = matching = different = missing = extra = 0
+    sum_func = sum_import = sum_class = sum_control = sum_callgraph = 0.0
+    count = 0
     for pair in pairs:
         details = pair.get('details', {})
         total += details.get('total_functions', 0)
@@ -95,12 +97,29 @@ def aggregate_js_summary(pairs):
         different += details.get('different_functions', 0)
         missing += details.get('missing_functions', 0)
         extra += details.get('extra_functions', 0)
+        if 'function_similarity' in details:
+            sum_func += details.get('function_similarity', 0.0)
+            sum_import += details.get('import_similarity', 0.0)
+            sum_class += details.get('class_similarity', 0.0)
+            sum_control += details.get('control_flow_similarity', 0.0)
+            sum_callgraph += details.get('call_graph_similarity', 0.0)
+            count += 1
+    avg_func = sum_func / count if count else 0.0
+    avg_import = sum_import / count if count else 0.0
+    avg_class = sum_class / count if count else 0.0
+    avg_control = sum_control / count if count else 0.0
+    avg_callgraph = sum_callgraph / count if count else 0.0
     return {
         'total_functions': total,
         'matching_functions': matching,
         'different_functions': different,
         'missing_functions': missing,
-        'extra_functions': extra
+        'extra_functions': extra,
+        'function_similarity': avg_func,
+        'import_similarity': avg_import,
+        'class_similarity': avg_class,
+        'control_flow_similarity': avg_control,
+        'call_graph_similarity': avg_callgraph
     }
 
 @app.route('/')
@@ -312,12 +331,9 @@ def analyze_zip():
         # Find Tailwind config files in both directories
         orig_config_files = glob.glob(os.path.join(orig_dir, '**', 'tailwind.config.js'), recursive=True)
         mod_config_files = glob.glob(os.path.join(mod_dir, '**', 'tailwind.config.js'), recursive=True)
-        print("[DEBUG] Original config files found:", orig_config_files)
-        print("[DEBUG] Modified config files found:", mod_config_files)
         config_pairs = []
         for orig_cfg in orig_config_files:
             for mod_cfg in mod_config_files:
-                print(f"[DEBUG] Calling compare_configs for: {orig_cfg} and {mod_cfg}")
                 config_pairs.append({
                     'type': 'tailwind',
                     'original_path': orig_cfg,
@@ -339,30 +355,9 @@ def analyze_zip():
         css_score = results.get('css', {}).get('aggregate_score', 0.0)
         jsx_score = results.get('jsx', {}).get('aggregate_score', 0.0)
         tailwind_score = tailwind.get('class_similarity', 0.0)
-        # Determine which categories are present (at least one file in either folder)
-        present = {}
-        base_weights = {'html': 0.4, 'css': 0.2, 'jsx': 0.2, 'tailwind': 0.2}
-        if results.get('html', {}).get('matched_pairs') or results.get('html', {}).get('unmatched_original') or results.get('html', {}).get('unmatched_modified'):
-            present['html'] = html_score
-        if results.get('css', {}).get('matched_pairs') or results.get('css', {}).get('unmatched_original') or results.get('css', {}).get('unmatched_modified'):
-            present['css'] = css_score
-        if results.get('jsx', {}).get('matched_pairs') or results.get('jsx', {}).get('unmatched_original') or results.get('jsx', {}).get('unmatched_modified'):
-            present['jsx'] = jsx_score
-        # For tailwind, check if any class_results or config_results exist
-        if (tailwind.get('class_similarity', 0.0) > 0 or
-            tailwind.get('config_similarity', 0.0) > 0 or
-            tailwind.get('shared_classes') or
-            tailwind.get('shared_config_keys')):
-            present['tailwind'] = tailwind_score
-        # Normalize weights
-        present_weights = {k: base_weights[k] for k in present}
-        total_weight = sum(present_weights.values())
-        if total_weight == 0:
-            weighted = 0.0
-        else:
-            weighted = sum(present[k] * (present_weights[k] / total_weight) for k in present)
+        # Remove base_weights and weighted average logic
+        # Only use file-count-based overall_similarity (already computed in match_and_compare_all)
         results['similarity_scores'] = {
-            'overall': weighted,
             'html': html_score,
             'jsx': jsx_score,
             'css': css_score,
@@ -377,8 +372,6 @@ def analyze_zip():
             json.dump(results, f, indent=2)
         results['report_url'] = '/download/report'
         # Use the backend's summary as-is, but future-proof: always include all keys
-        print('[DEBUG] results["summary"] before compact_results:', results['summary'])
-        # Future-proof: copy all keys from results['summary']
         summary = {k: v for k, v in results['summary'].items()}
         compact_results = {
             'similarity': results.get('overall_similarity', 0.0),
@@ -400,7 +393,6 @@ def analyze_zip():
             'prediction': results.get('prediction', ''),
             'report_url': results.get('report_url', '')
         }
-        print('[DEBUG] compact_results summary.js:', compact_results['summary'].get('js'))
         return jsonify(compact_results)
     except Exception as e:
         return jsonify({'error': str(e)}), 500

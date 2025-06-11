@@ -53,38 +53,80 @@ For each file type (HTML, CSS, JSX/TSX, Tailwind):
 - **CSS:** Compares selectors and property-value pairs with normalization.
 - **Tailwind:** Extracts all Tailwind utility classes from markup files and compares config files.
 
-### 4. TSX/JSX Parsing Approach (NEW)
-- Uses the [tree-sitter](https://tree-sitter.github.io/tree-sitter/) parser for robust, language-aware parsing of JSX/TSX files.
-- **No Node.js required for parsing JSX/TSX!**
-- **No manual .so/.dll/.dylib management for users:**  
-  - The project uses a GitHub Actions workflow to build and commit prebuilt shared libraries (`my-languages.dll`, `.so`, `.dylib`) for all major platforms.
-  - The Python code automatically loads the correct library for your OS:
-    ```python
-    import os, platform
-    from tree_sitter import Language, Parser
+### 3a. JavaScript/TypeScript (JS/TS) Similarity Model
 
-    PLATFORM = platform.system().lower()
-    if PLATFORM == 'windows':
-        LIB_PATH = os.path.join(os.path.dirname(__file__), '..', 'prebuilt', 'windows-latest', 'my-languages.dll')
-    elif PLATFORM == 'darwin':
-        LIB_PATH = os.path.join(os.path.dirname(__file__), '..', 'prebuilt', 'macos-latest', 'my-languages.dylib')
-    else:
-        LIB_PATH = os.path.join(os.path.dirname(__file__), '..', 'prebuilt', 'ubuntu-latest', 'my-languages.so')
+The tool performs deep, structure-aware comparison of JavaScript and TypeScript files using the following approach:
 
-    LIB_PATH = os.path.abspath(LIB_PATH)
-    TSX_LANGUAGE = Language(LIB_PATH, 'tsx')
-    parser = Parser()
-    parser.set_language(TSX_LANGUAGE)
+- **Parsing:**
+  - JS/TS files are parsed into abstract syntax trees (ASTs) using [tree-sitter](https://tree-sitter.github.io/tree-sitter/).
+  - The ASTs are normalized to focus on code structure (functions, classes, imports, control flow) rather than raw text.
+  - **All identifiers (variable, function, class names) and literals (strings, numbers, booleans) are normalized to generic tokens before comparison.**
+
+- **What is Compared:**
+  - **Functions:** Names, parameters, and **deep tree-based comparison of function bodies** (robust to reordering and minor edits).
+  - **Imports/Exports:** Module sources and specifiers.
+  - **Classes:** Class names and their methods.
+  - **Control Flow:** Structures like `if`, `for`, `while` statements.
+  - **Call Graph:** Function call relationships (who calls whom).
+
+- **Similarity Calculation (Per-File):**
+  - For each matched JS/TS file pair, the following weighted formula is used:
     ```
-  - This ensures **cross-platform compatibility** and up-to-date grammar support, as the grammars are rebuilt and committed automatically on every **tag push** (e.g., v1.0.0) or when manually triggered.
+    overall_similarity = (
+        0.35 * function_similarity +
+        0.15 * import_similarity +
+        0.15 * class_similarity +
+        0.15 * control_flow_similarity +
+        0.20 * call_graph_similarity
+    )
+    ```
+  - **function_similarity** uses a deep, tree-based comparison of function bodies.
+  - **call_graph_similarity** uses Jaccard similarity of function call edges.
+  - Unmatched files are penalized as 0.0 in the aggregate.
 
-### 5. Scoring and Penalization
+- **Aggregate JS/TS Score:**
+  - The aggregate JS/TS score is the average of all matched pairwise similarities, plus 0.0 for each unmatched file.
+
+### 3b. JSX/TSX (React/Next.js Component) Similarity Model
+
+- **Parsing:**
+  - JSX/TSX files are parsed into ASTs using tree-sitter.
+  - Identifiers and literals are normalized.
+
+- **What is Compared:**
+  - **Component/Function Structure:** AST/DOM structure (elements, attributes, etc.).
+  - **Call Graph:** Component/function call relationships.
+  - **Component/Function Body:** **Deep tree-based comparison** of all top-level function/component bodies.
+
+- **Similarity Calculation (Per-File):**
+  - For each matched JSX/TSX file pair, the following weighted formula is used:
+    ```
+    jsx_similarity_score = (
+        0.6 * structure_similarity +
+        0.2 * call_graph_similarity +
+        0.2 * body_similarity
+    )
+    ```
+  - **body_similarity** is the average best-match tree similarity of all top-level function/component bodies.
+  - Unmatched files are penalized as 0.0 in the aggregate.
+
+### 5. Scoring and Penalization (Updated)
 - For each file type, the aggregate similarity score is:
   ```
   final_score = (sum of all similarity scores for matched pairs + 0.0 for each unmatched file) / total number of files involved
   ```
   - **Unmatched files** are penalized as 0.0 in the score.
-  - **Dynamic Weighted Overall Score:** The overall similarity is a weighted average of the present categories (HTML, CSS, JSX, Tailwind).
+  - **Overall Similarity (File-Count-Based Average):**
+    - The overall similarity is calculated as a file-count-based average of all per-file-type similarities (HTML, CSS, JSX/TSX, JS/TS, Tailwind, etc.).
+    - This means every matched or unmatched file contributes equally to the final score, making the approach robust and fair regardless of project composition.
+    - This method is preferred over a fixed weighted average, as it adapts to the actual file distribution in the compared projects.
+
+### Recent Improvements & Robustness
+- **Identifier/Literal Normalization:** Robust to renaming and literal changes.
+- **Call Graph Analysis:** Captures behavioral similarity, not just structure.
+- **Deep Tree-Based Function/Component Body Comparison:** Robust to reordering, minor edits, and structural changes in logic-heavy files.
+- **JSX/TSX Logic:** Now includes deep function/component body comparison, not just markup structure.
+- **All weights and logic are documented above and kept up to date with the codebase.**
 
 ### 6. Output & Reporting
 - The tool returns a detailed JSON report including per-type summaries, file matches, and overall similarity verdicts.
@@ -147,6 +189,19 @@ jsx-forensic-tool/
   - This ensures all users always get the latest grammar support for each release, without manual compilation.
 - **No need to build locally:**
   - Just pull the latest code and the correct binary for your OS will be used automatically.
+
+---
+
+## Files Always Excluded from Scoring
+
+Certain files are excluded from similarity scoring because they are always (or almost always) identical across all React/Next.js projects and do not reflect meaningful code similarity. This helps ensure the scoring is fair and focused on real, project-specific code.
+
+**Currently excluded files:**
+
+1. `next-env.d.ts`  
+   _Auto-generated by Next.js for TypeScript projects; always identical._
+
+_This list may grow as the project evolves. If you notice other files that should be excluded, please open an issue or pull request!_
 
 ---
 

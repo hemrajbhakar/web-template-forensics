@@ -119,10 +119,8 @@ class TailwindAnalyzer:
             result = subprocess.run(['node', '-e', node_script], capture_output=True, text=True, check=True)
             config_json = result.stdout.strip()
             config = json.loads(config_json)
-            print(f"[DEBUG] Parsed config from {config_path}: {config}")
             return config
         except Exception as e:
-            print(f"[ERROR] Failed to parse config {config_path}: {e}")
             return {'error': str(e)}
 
     def extract_theme_extensions(self, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -149,14 +147,10 @@ class TailwindAnalyzer:
         user_cfg = self.parse_config(user_path)
         orig_ext = self.extract_theme_extensions(orig_cfg)
         user_ext = self.extract_theme_extensions(user_cfg)
-        print(f"[DEBUG] Original extension keys: {list(orig_ext.keys())}")
-        print(f"[DEBUG] User extension keys: {list(user_ext.keys())}")
         orig_keys = set(orig_ext.keys())
         user_keys = set(user_ext.keys())
         key_intersection = orig_keys & user_keys
         key_union = orig_keys | user_keys
-        print(f"[DEBUG] Key intersection: {key_intersection}")
-        print(f"[DEBUG] Key union: {key_union}")
         key_similarity = len(key_intersection) / len(key_union) if key_union else 1.0
         # Detailed per-extension diff and subkey similarity (partial match)
         shared_config_values = {}
@@ -169,14 +163,9 @@ class TailwindAnalyzer:
                 orig_subkeys = set(orig_val.keys())
                 user_subkeys = set(user_val.keys())
                 shared_subkeys = orig_subkeys & user_subkeys
-                print(f"[DEBUG] For extension '{ext_key}':")
-                print(f"  Original subkeys: {orig_subkeys}")
-                print(f"  User subkeys: {user_subkeys}")
-                print(f"  Shared subkeys: {shared_subkeys}")
                 subkey_union = orig_subkeys | user_subkeys
                 subkey_intersection = shared_subkeys
                 subkey_similarity = len(subkey_intersection) / len(subkey_union) if subkey_union else 1.0
-                print(f"  Subkey similarity: {subkey_similarity}")
                 per_extension_similarity[ext_key] = subkey_similarity
                 subkey_similarities.append(subkey_similarity)
                 only_in_original = {k: orig_val[k] for k in orig_subkeys - user_subkeys}
@@ -196,11 +185,6 @@ class TailwindAnalyzer:
                 subkey_similarities.append(per_extension_similarity[ext_key])
         all_similarities = [key_similarity] + subkey_similarities if subkey_similarities else [key_similarity]
         improved_config_similarity = sum(all_similarities) / len(all_similarities) if all_similarities else 1.0
-        print(f"[DEBUG] key_similarity: {key_similarity}")
-        print(f"[DEBUG] subkey_similarities: {subkey_similarities}")
-        print(f"[DEBUG] improved_config_similarity: {improved_config_similarity}")
-        if improved_config_similarity == 0.0:
-            print("[DEBUG] Config similarity is 0.0 because there are no shared extension keys or subkeys.")
         result = {
             'original_config': orig_ext,
             'user_config': user_ext,

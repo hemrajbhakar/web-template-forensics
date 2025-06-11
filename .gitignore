@@ -92,4 +92,7 @@ env/
 
 # Tree-sitter directories
 tree-sitter-javascript/
-tree-sitter-typescript/ 
+tree-sitter-typescript/
+
+# New pattern
+todo.txt 
