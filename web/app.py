@@ -86,6 +86,23 @@ def aggregate_css_summary(pairs):
         'extra_selectors': extra
     }
 
+def aggregate_js_summary(pairs):
+    total = matching = different = missing = extra = 0
+    for pair in pairs:
+        details = pair.get('details', {})
+        total += details.get('total_functions', 0)
+        matching += details.get('matching_functions', 0)
+        different += details.get('different_functions', 0)
+        missing += details.get('missing_functions', 0)
+        extra += details.get('extra_functions', 0)
+    return {
+        'total_functions': total,
+        'matching_functions': matching,
+        'different_functions': different,
+        'missing_functions': missing,
+        'extra_functions': extra
+    }
+
 @app.route('/')
 def index():
     """Render the main page."""
@@ -314,6 +331,7 @@ def analyze_zip():
             'html': aggregate_html_summary(results.get('html', {}).get('matched_pairs', [])),
             'jsx': aggregate_jsx_summary(results.get('jsx', {}).get('matched_pairs', [])),
             'css': aggregate_css_summary(results.get('css', {}).get('matched_pairs', [])),
+            'js': aggregate_js_summary(results.get('js', {}).get('matched_pairs', [])),
             'tailwind': tailwind  # Use the full robust tailwind result
         }
         # Add compatibility field for frontend
@@ -348,6 +366,7 @@ def analyze_zip():
             'html': html_score,
             'jsx': jsx_score,
             'css': css_score,
+            'js': results.get('js', {}).get('aggregate_score', 0.0),
             'tailwind': tailwind_score
         }
         # Ensure both similarity and similarity_scores['overall'] use the file-count-based value
@@ -357,43 +376,31 @@ def analyze_zip():
         with open(report_path, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2)
         results['report_url'] = '/download/report'
-        # Prepare compact frontend response
+        # Use the backend's summary as-is, but future-proof: always include all keys
+        print('[DEBUG] results["summary"] before compact_results:', results['summary'])
+        # Future-proof: copy all keys from results['summary']
+        summary = {k: v for k, v in results['summary'].items()}
         compact_results = {
             'similarity': results.get('overall_similarity', 0.0),
             'similarity_scores': results.get('similarity_scores', {}),
-            'summary': {
-                'html': results['summary'].get('html', {}),
-                'jsx': results['summary'].get('jsx', {}),
-                'css': results['summary'].get('css', {}),
-                'tailwind': {
-                    'class_similarity': tailwind.get('class_similarity', 0.0),
-                    'config_similarity': tailwind.get('config_similarity', 0.0),
-                    'shared_classes': tailwind.get('shared_classes', []),
-                    'only_in_original': tailwind.get('only_in_original', []),
-                    'only_in_user': tailwind.get('only_in_user', []),
-                    'shared_config_keys': tailwind.get('shared_config_keys', []),
-                    'only_in_original_config': tailwind.get('only_in_original_config', []),
-                    'only_in_user_config': tailwind.get('only_in_user_config', []),
-                    'shared_config_values': tailwind.get('shared_config_values', {})
-                }
-            },
+            'summary': summary,  # Use all keys present in backend summary
             'file_matches': {
                 'html': results.get('html', {}).get('matched_pairs', []),
                 'css': results.get('css', {}).get('matched_pairs', []),
                 'jsx': results.get('jsx', {}).get('matched_pairs', []),
+                'js': results.get('js', {}).get('matched_pairs', []),
                 'tailwind': tailwind.get('per_file_results', []),
                 'unmatched': {
                     'html': results.get('html', {}).get('unmatched_files', {}),
                     'css': results.get('css', {}).get('unmatched_files', {}),
-                    'jsx': results.get('jsx', {}).get('unmatched_files', {})
+                    'jsx': results.get('jsx', {}).get('unmatched_files', {}),
+                    'js': results.get('js', {}).get('unmatched_files', {})
                 }
             },
             'prediction': results.get('prediction', ''),
             'report_url': results.get('report_url', '')
         }
-        # Save compact report for download
-        with open(report_path, 'w', encoding='utf-8') as f:
-            json.dump(compact_results, f, indent=2)
+        print('[DEBUG] compact_results summary.js:', compact_results['summary'].get('js'))
         return jsonify(compact_results)
     except Exception as e:
         return jsonify({'error': str(e)}), 500

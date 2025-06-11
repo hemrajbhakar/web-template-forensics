@@ -12,6 +12,7 @@ from .structure_comparator import StructureComparator
 from .css_style_checker import CSSStyleChecker
 from .tailwind_analyzer import TailwindAnalyzer
 from .jsx_treesitter_parser import parse_jsx_with_treesitter
+from .js_logic_analyzer import JSLogicAnalyzer
 
 # --- Step 1: Unzip & list files ---
 def unzip_to_tempdir(zip_path: str) -> str:
@@ -22,7 +23,7 @@ def unzip_to_tempdir(zip_path: str) -> str:
     return temp_dir
 
 def list_files_by_type(root_dir: str) -> Dict[str, List[str]]:
-    """Recursively list files by type (html, css, jsx/tsx) with relative paths from root_dir. Skip all other file types."""
+    """Recursively list files by type (html, css, jsx/tsx, js/ts) with relative paths from root_dir. Skip all other file types."""
     file_types = defaultdict(list)
     for dirpath, _, filenames in os.walk(root_dir):
         for fname in filenames:
@@ -34,6 +35,8 @@ def list_files_by_type(root_dir: str) -> Dict[str, List[str]]:
                 file_types['css'].append(rel_path)
             elif ext in ('.jsx', '.tsx'):
                 file_types['jsx'].append(rel_path)
+            elif ext in ('.js', '.ts'):
+                file_types['js'].append(rel_path)
             elif fname == 'tailwind.config.js':
                 file_types['tailwind_config'].append(rel_path)
             # Skip all other files
@@ -193,6 +196,39 @@ def structure_match_jsx(unmatched1: List[str], unmatched2: List[str], dir1: str,
             used2.add(best_f2)
     return matches
 
+def structure_match_js(unmatched1: List[str], unmatched2: List[str], dir1: str, dir2: str, threshold: float = 0.5) -> List[Tuple[str, str, float]]:
+    """Structure-based matching for JS/TS files using tree-sitter parser."""
+    analyzer = JSLogicAnalyzer()
+    matches = []
+    used2 = set()
+    
+    for f1 in unmatched1:
+        best_score = 0
+        best_f2 = None
+        path1 = os.path.join(dir1, f1)
+        
+        for f2 in unmatched2:
+            if f2 in used2:
+                continue
+            path2 = os.path.join(dir2, f2)
+            
+            try:
+                result = analyzer.compare_files(path1, path2)
+                score = result['similarity']
+                
+                if score > best_score:
+                    best_score = score
+                    best_f2 = f2
+            except Exception as e:
+                print(f"Error comparing {f1} and {f2}: {str(e)}")
+                continue
+                
+        if best_score >= threshold and best_f2:
+            matches.append((f1, best_f2, best_score))
+            used2.add(best_f2)
+            
+    return matches
+
 # Replace structure_match_stub with dispatcher
 
 def structure_match(files1: List[str], files2: List[str], dir1: str, dir2: str, filetype: str, threshold: float = 0.5) -> List[Tuple[str, str, float]]:
@@ -203,6 +239,8 @@ def structure_match(files1: List[str], files2: List[str], dir1: str, dir2: str, 
         return structure_match_jsx(files1, files2, dir1, dir2, threshold)
     elif filetype == 'css':
         return structure_match_css(files1, files2, dir1, dir2, threshold)
+    elif filetype == 'js':
+        return structure_match_js(files1, files2, dir1, dir2, threshold)
     else:
         return []
 
@@ -284,8 +322,23 @@ def handler(signum, frame):
 # --- Main orchestrator for full matching and comparison workflow ---
 def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
     print('--- [LOG] Starting match_and_compare_all ---')
-    file_types = ['html', 'css', 'jsx']
-    results = {}
+    file_types = ['html', 'css', 'jsx', 'js']
+    results = {
+        'file_matches': {
+            'html': [],
+            'css': [],
+            'jsx': [],
+            'js': [],
+            'tailwind': []
+        },
+        'unmatched': {
+            'html': {'original': [], 'modified': []},
+            'css': {'original': [], 'modified': []},
+            'jsx': {'original': [], 'modified': []},
+            'js': {'original': [], 'modified': []},
+            'tailwind': {'original': [], 'modified': []}
+        }
+    }
     total_files_compared = Counter()
     all_scores = []
     unmatched_files = {ftype: {'original': [], 'modified': []} for ftype in file_types}
@@ -376,6 +429,23 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
                 pair['details'] = comp_result.to_dict()
                 all_scores.append(comp_result.similarity_score)
                 print(f'--- [LOG] JSX: Finished comparison for {pair["original"]} and {pair["modified"]} ---')
+            elif filetype == 'js':
+                print(f'--- [LOG] JS: Starting comparison for {pair["original"]} and {pair["modified"]} ---')
+                analyzer = JSLogicAnalyzer()
+                orig_path = os.path.join(original_dir, pair['original'])
+                mod_path = os.path.join(modified_dir, pair['modified'])
+                print(f'--- [LOG] JS: Parsing original {orig_path} ---')
+                try:
+                    comp_result = analyzer.compare_files(orig_path, mod_path)
+                    print(f'--- [LOG] JS: Finished comparison for {pair["original"]} and {pair["modified"]} ---')
+                    pair['similarity'] = comp_result['similarity']
+                    pair['details'] = comp_result['details']
+                    all_scores.append(comp_result['similarity'])
+                except Exception as e:
+                    print(f'--- [ERROR] JS comparison failed: {str(e)} ---')
+                    pair['similarity'] = 0.0
+                    pair['details'] = {'error': str(e)}
+                    all_scores.append(0.0)
             # Tailwind class comparison for HTML and JSX
             if filetype in ('html', 'jsx'):
                 orig_path = os.path.join(original_dir, pair['original'])
@@ -403,8 +473,6 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
                     total_classes = sum(tw_result['original_classes'].values()) + sum(tw_result['user_classes'].values())
                     weighted_scores.append((tw_result.get('hybrid_similarity', 0.0), total_classes))
                     total_class_counts.append(total_classes)
-                # else:
-                #     print(f"Skipping {pair['original']} and {pair['modified']} for Tailwind comparison (no classes found)")
         print(f'--- [LOG] {filetype}: pairwise comparison done ---')
         # Step 8: Aggregate (penalize unmatched files)
         num_matched = len(matched_pairs)
@@ -435,6 +503,9 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
     # CSS
     for r in results.get('css', {}).get('matched_pairs', []):
         similarities.append(r.get('similarity', r.get('score', 0.0)))
+    # JS
+    for r in results.get('js', {}).get('matched_pairs', []):
+        similarities.append(r.get('similarity', r.get('score', 0.0)))
     # Tailwind classes
     for r in tailwind_results:
         similarities.append(r['similarity'])
@@ -452,7 +523,8 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
         'overall_match_quality': get_prediction(overall_similarity),
         'html_prediction': predictions.get('html', ''),
         'css_prediction': predictions.get('css', ''),
-        'jsx_prediction': predictions.get('jsx', '')
+        'jsx_prediction': predictions.get('jsx', ''),
+        'js_prediction': predictions.get('js', '')
     }
     print('--- [LOG] Preparing Tailwind aggregation ---')
     # Ensure these are always defined, even if no tailwind_results
@@ -460,7 +532,7 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
     only_in_original = set()
     only_in_user = set()
     change_impact_all = []
-    tailwind_similarity = sum(tailwind_scores) / len(tailwind_scores) if tailwind_scores else 1.0
+    tailwind_similarity = sum(tailwind_scores) / len(tailwind_scores) if tailwind_scores else 0.0
     set_jaccard_avg = sum(set_jaccard_scores) / len(set_jaccard_scores) if 'set_jaccard_scores' in locals() and set_jaccard_scores else 1.0
     freq_jaccard_avg = sum(freq_jaccard_scores) / len(freq_jaccard_scores) if 'freq_jaccard_scores' in locals() and freq_jaccard_scores else 1.0
     # Median and percent above 0.9
@@ -551,22 +623,47 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
             'missing_selectors': missing,
             'extra_selectors': extra
         }
+    def aggregate_js_summary(pairs):
+        total = matching = different = missing = extra = 0
+        for pair in pairs:
+            details = pair.get('details', {})
+            total += details.get('total_functions', 0)
+            matching += details.get('matching_functions', 0)
+            different += details.get('different_functions', 0)
+            missing += details.get('missing_functions', 0)
+            extra += details.get('extra_functions', 0)
+        return {
+            'total_functions': total,
+            'matching_functions': matching,
+            'different_functions': different,
+            'missing_functions': missing,
+            'extra_functions': extra
+        }
     results['summary'] = {
         'html': aggregate_html_summary(results.get('html', {}).get('matched_pairs', [])),
         'jsx': aggregate_jsx_summary(results.get('jsx', {}).get('matched_pairs', [])),
         'css': aggregate_css_summary(results.get('css', {}).get('matched_pairs', [])),
+        'js': aggregate_js_summary(results.get('js', {}).get('matched_pairs', [])) if results.get('js', {}).get('matched_pairs', []) else {
+            'total_functions': 0,
+            'matching_functions': 0,
+            'different_functions': 0,
+            'missing_functions': 0,
+            'extra_functions': 0
+        },
         'files_compared': files_compared,
         'files_matched': files_matched,
         'files_unmatched': files_unmatched
     }
+    print('[DEBUG] JS summary before return:', results['summary']['js'])
     results['similarity_scores'] = {
         'overall': results.get('overall_similarity', 0.0),
         'html': results.get('html', {}).get('aggregate_score', 0.0),
         'jsx': results.get('jsx', {}).get('aggregate_score', 0.0),
         'css': results.get('css', {}).get('aggregate_score', 0.0),
-        'tailwind': results.get('tailwind', {}).get('class_similarity', 1.0),
-        'tailwind_set_jaccard': results.get('tailwind', {}).get('set_jaccard', 1.0),
-        'tailwind_frequency_weighted_jaccard': results.get('tailwind', {}).get('frequency_weighted_jaccard', 1.0)
+        'js': results.get('js', {}).get('aggregate_score', 0.0),
+        'tailwind': results.get('tailwind', {}).get('class_similarity', 0.0),
+        'tailwind_set_jaccard': results.get('tailwind', {}).get('set_jaccard', 0.0),
+        'tailwind_frequency_weighted_jaccard': results.get('tailwind', {}).get('frequency_weighted_jaccard', 0.0)
     }
     print('--- [LOG] Returning results from match_and_compare_all ---')
     # --- Tailwind config comparison (if config files exist) ---
@@ -592,4 +689,33 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
             results['tailwind']['shared_config_values'] = config_results[0].get('shared_config_values', {})
         else:
             results['tailwind']['config_similarity'] = 0.0
+
+    # Update file_matches with JS results
+    if 'js' in results:
+        results['file_matches']['js'] = results['js'].get('matched_pairs', [])
+        results['unmatched']['js'] = {
+            'original': unmatched_files['js']['original'],
+            'modified': unmatched_files['js']['modified']
+        }
+
+    # Ensure JS keys are always present before returning results
+    if 'js' not in results['file_matches']:
+        print('[DEBUG] Adding missing js to file_matches')
+        results['file_matches']['js'] = []
+    if 'js' not in results['unmatched']:
+        print('[DEBUG] Adding missing js to unmatched')
+        results['unmatched']['js'] = {'original': [], 'modified': []}
+    if 'js' not in results['similarity_scores']:
+        print('[DEBUG] Adding missing js to similarity_scores')
+        results['similarity_scores']['js'] = 0.0
+    if 'js' not in results['summary']:
+        print('[DEBUG] Adding missing js to summary')
+        results['summary']['js'] = {
+            'total_functions': 0,
+            'matching_functions': 0,
+            'different_functions': 0,
+            'missing_functions': 0,
+            'extra_functions': 0
+        }
+    print('[DEBUG] Final results before return:', results)
     return results 

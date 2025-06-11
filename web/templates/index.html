@@ -143,6 +143,21 @@
                             </div>
                         </div>
                     </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-700 mb-4">JS/TS Similarity</h3>
+                        <div class="relative pt-1">
+                            <div class="flex mb-2 items-center justify-between">
+                                <div>
+                                    <span id="jsScore" class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-indigo-600 bg-indigo-200">
+                                        0%
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-indigo-200">
+                                <div id="jsBar" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-indigo-500" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -156,8 +171,8 @@
                     <canvas id="jsxChart"></canvas>
                 </div>
                 <div class="bg-white rounded-lg border border-gray-300 p-6">
-                    <h3 class="text-xl font-semibold text-gray-800 mb-4">CSS Comparison</h3>
-                    <canvas id="cssChart"></canvas>
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">JS/TS Comparison</h3>
+                    <canvas id="jsChart"></canvas>
                 </div>
             </div>
 
@@ -258,6 +273,7 @@
             updateScore('overall', data.similarity_scores.overall);
             updateScore('html', data.similarity_scores.html);
             updateScore('jsx', data.similarity_scores.jsx);
+            updateScore('js', data.similarity_scores.js);
             updateScore('css', data.similarity_scores.css);
             
             // Update HTML chart
@@ -265,6 +281,9 @@
             
             // Update JSX chart
             updateChart('jsxChart', data.summary.jsx, 'JSX Elements');
+            
+            // Update JS/TS chart
+            updateChart('jsChart', data.summary.js, 'JS/TS Elements');
             
             // Update CSS chart
             updateChart('cssChart', data.summary.css, 'CSS Selectors');
@@ -296,7 +315,9 @@
         }
         
         function updateChart(canvasId, data, label) {
-            const ctx = document.getElementById(canvasId).getContext('2d');
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return; // Prevent error if canvas is missing
+            const ctx = canvas.getContext('2d');
             let chartData;
             if (canvasId === 'cssChart') {
                 chartData = [
@@ -384,6 +405,27 @@
                             <div class="p-4 bg-red-50 rounded-lg">
                                 <h4 class="font-medium text-red-700">Missing/Extra</h4>
                                 <p class="text-2xl font-bold text-red-900">${summary.jsx.missing_elements + summary.jsx.extra_elements}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="space-y-4">
+                        <h3 class="text-lg font-medium text-gray-900">JS/TS Comparison</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="p-4 bg-gray-50 rounded-lg">
+                                <h4 class="font-medium text-gray-700">Function Similarity</h4>
+                                <p class="text-2xl font-bold text-gray-900">${summary.js.function_similarity || 0}</p>
+                            </div>
+                            <div class="p-4 bg-green-50 rounded-lg">
+                                <h4 class="font-medium text-green-700">Import Similarity</h4>
+                                <p class="text-2xl font-bold text-green-900">${summary.js.import_similarity || 0}</p>
+                            </div>
+                            <div class="p-4 bg-yellow-50 rounded-lg">
+                                <h4 class="font-medium text-yellow-700">Class Similarity</h4>
+                                <p class="text-2xl font-bold text-yellow-900">${summary.js.class_similarity || 0}</p>
+                            </div>
+                            <div class="p-4 bg-red-50 rounded-lg">
+                                <h4 class="font-medium text-red-700">Control Flow Similarity</h4>
+                                <p class="text-2xl font-bold text-red-900">${summary.js.control_flow_similarity || 0}</p>
                             </div>
                         </div>
                     </div>
@@ -516,6 +558,7 @@
             let tablesHtml = '';
             tablesHtml += renderFileMatchTable(fileMatches.html || [], fileMatches.unmatched?.html || {original:[],modified:[]}, 'HTML');
             tablesHtml += renderFileMatchTable(fileMatches.jsx || [], fileMatches.unmatched?.jsx || {original:[],modified:[]}, 'JSX/TSX');
+            tablesHtml += renderFileMatchTable(fileMatches.js || [], fileMatches.unmatched?.js || {original:[],modified:[]}, 'JS/TS');
             tablesHtml += renderFileMatchTable(fileMatches.css || [], fileMatches.unmatched?.css || {original:[],modified:[]}, 'CSS');
             tablesHtml += renderFileMatchTable(fileMatches.tailwind || [], null, 'Tailwind Classes');
             document.getElementById('fileMatchTables').innerHTML = tablesHtml;

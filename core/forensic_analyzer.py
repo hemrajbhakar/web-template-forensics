@@ -1,6 +1,6 @@
 """
 Main Forensic Analyzer Interface
-Coordinates HTML and JSX template comparisons.
+Coordinates HTML, JSX, and JS/TS template comparisons.
 """
 
 from typing import Dict, Optional, Union, Tuple
@@ -11,25 +11,42 @@ from .structure_comparator import StructureComparator, ComparisonResult
 import subprocess
 import tempfile
 from core.jsx_treesitter_parser import parse_jsx_with_treesitter
+from core.js_logic_analyzer import JSLogicAnalyzer
 
 class TemplateComparison:
     def __init__(self, 
                  html_similarity: float,
                  jsx_similarity: float,
+                 js_similarity: float,
                  html_details: ComparisonResult,
                  jsx_details: ComparisonResult,
-                 jsx_present: bool = True):
+                 js_details: Dict,
+                 jsx_present: bool = True,
+                 js_present: bool = True):
         self.html_similarity = html_similarity
         self.jsx_similarity = jsx_similarity
+        self.js_similarity = js_similarity
         self.html_details = html_details
         self.jsx_details = jsx_details
+        self.js_details = js_details
         # Determine which scores to use for overall_similarity
-        if html_similarity > 0 and jsx_similarity > 0:
-            self.overall_similarity = (html_similarity + jsx_similarity) / 2
-        elif html_similarity > 0:
-            self.overall_similarity = html_similarity
-        elif jsx_similarity > 0:
-            self.overall_similarity = jsx_similarity
+        scores = []
+        weights = []
+        if html_similarity > 0:
+            scores.append(html_similarity)
+            weights.append(0.3)
+        if jsx_similarity > 0:
+            scores.append(jsx_similarity)
+            weights.append(0.3)
+        if js_similarity > 0:
+            scores.append(js_similarity)
+            weights.append(0.4)
+            
+        if scores:
+            # Normalize weights
+            total_weight = sum(weights)
+            weights = [w/total_weight for w in weights]
+            self.overall_similarity = sum(s * w for s, w in zip(scores, weights))
         else:
             self.overall_similarity = 0.0
 
@@ -37,14 +54,17 @@ class ForensicAnalyzer:
     def __init__(self):
         self.html_parser = HTMLParser()
         self.comparator = StructureComparator()
+        self.js_analyzer = JSLogicAnalyzer()
         self.last_result: Optional[TemplateComparison] = None
         
     def analyze_templates(self,
                         original_html_path: Union[str, Path, None],
                         original_jsx_path: Union[str, Path, None],
+                        original_js_path: Union[str, Path, None],
                         user_html_path: Union[str, Path, None],
-                        user_jsx_path: Union[str, Path, None]) -> TemplateComparison:
-        """Analyze and compare original and user templates (HTML and/or JSX)."""
+                        user_jsx_path: Union[str, Path, None],
+                        user_js_path: Union[str, Path, None]) -> TemplateComparison:
+        """Analyze and compare original and user templates (HTML, JSX, and JS/TS)."""
         # Parse HTML templates if paths are provided
         if original_html_path is not None and user_html_path is not None:
             original_html_tree = self.html_parser.parse_file(original_html_path)
@@ -52,6 +72,7 @@ class ForensicAnalyzer:
             html_result = self.comparator.compare_structures(original_html_tree, user_html_tree)
         else:
             html_result = ComparisonResult()  # empty/default result
+            
         # Parse JSX templates if paths are provided
         if original_jsx_path is not None and user_jsx_path is not None:
             with open(original_jsx_path, 'r', encoding='utf-8') as f:
@@ -63,15 +84,27 @@ class ForensicAnalyzer:
             jsx_result = self.comparator.compare_structures(original_jsx_tree, user_jsx_tree)
         else:
             jsx_result = ComparisonResult()  # empty/default result
-        # Determine if either JSX tree has nodes
+            
+        # Parse JS/TS files if paths are provided
+        if original_js_path is not None and user_js_path is not None:
+            js_result = self.js_analyzer.compare_files(original_js_path, user_js_path)
+        else:
+            js_result = {'similarity': 0.0, 'details': {}}
+            
+        # Determine if JSX/JS trees have nodes
         jsx_present = (original_jsx_path is not None and user_jsx_path is not None)
+        js_present = (original_js_path is not None and user_js_path is not None)
+        
         # Create combined result
         self.last_result = TemplateComparison(
             html_similarity=html_result.similarity_score,
             jsx_similarity=jsx_result.similarity_score,
+            js_similarity=js_result['similarity'],
             html_details=html_result,
             jsx_details=jsx_result,
-            jsx_present=jsx_present
+            js_details=js_result,
+            jsx_present=jsx_present,
+            js_present=js_present
         )
         return self.last_result
     
@@ -149,9 +182,17 @@ class ForensicAnalyzer:
         
         html = self.last_result.html_details
         jsx = self.last_result.jsx_details
+        js = self.last_result.js_details
         
         html_summary = self._generate_summary(html)
         jsx_summary = self._generate_summary(jsx) if jsx is not None else "No JSX comparison performed."
+        js_summary = "No JS/TS comparison performed."
+        if js and isinstance(js, dict):
+            js_summary = f"Function similarity: {js.get('details', {}).get('function_similarity', 0):.2%}, " \
+                        f"Import similarity: {js.get('details', {}).get('import_similarity', 0):.2%}, " \
+                        f"Class similarity: {js.get('details', {}).get('class_similarity', 0):.2%}, " \
+                        f"Control flow similarity: {js.get('details', {}).get('control_flow_similarity', 0):.2%}"
+        
         prediction = self._get_prediction(self.last_result.overall_similarity)
         
         result_dict = {
@@ -172,6 +213,14 @@ class ForensicAnalyzer:
                 "missing_elements": len(jsx.missing_elements) if jsx is not None else 0,
                 "extra_elements": len(jsx.extra_elements) if jsx is not None else 0,
                 "summary": jsx_summary
+            },
+            "js_comparison": {
+                "similarity_score": self.last_result.js_similarity if js is not None else 0.0,
+                "function_similarity": js.get('details', {}).get('function_similarity', 0) if js is not None else 0.0,
+                "import_similarity": js.get('details', {}).get('import_similarity', 0) if js is not None else 0.0,
+                "class_similarity": js.get('details', {}).get('class_similarity', 0) if js is not None else 0.0,
+                "control_flow_similarity": js.get('details', {}).get('control_flow_similarity', 0) if js is not None else 0.0,
+                "summary": js_summary
             }
         }
         
@@ -193,9 +242,12 @@ class ForensicAnalyzer:
         self.last_result = TemplateComparison(
             html_similarity=html_result.similarity_score,
             jsx_similarity=0.0,  # No JSX comparison
+            js_similarity=0.0,  # No JS comparison
             html_details=html_result,
             jsx_details=None,  # No JSX details
-            jsx_present=False  # JSX not present
+            js_details={},  # No JS details
+            jsx_present=False,  # JSX not present
+            js_present=False  # JS not present
         )
         
         return self.last_result
@@ -213,6 +265,11 @@ class ForensicAnalyzer:
         # Add JSX score only if JSX was compared
         if self.last_result.jsx_details is not None:
             scores['jsx'] = self.last_result.jsx_similarity
+            scores['overall'] = self.last_result.overall_similarity
+            
+        # Add JS score only if JS was compared
+        if self.last_result.js_details:
+            scores['js'] = self.last_result.js_similarity
             scores['overall'] = self.last_result.overall_similarity
             
         return scores
