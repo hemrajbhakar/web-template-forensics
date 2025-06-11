@@ -100,6 +100,7 @@ For each file type (HTML, CSS, JSX/TSX, Tailwind):
    venv\Scripts\activate  # On Windows
    source venv/bin/activate  # On macOS/Linux
    pip install -r requirements.txt
+   python install.py  # Install tree-sitter wheel for your OS
    ```
 2. **Run the web app:**
    ```sh
@@ -114,7 +115,7 @@ For each file type (HTML, CSS, JSX/TSX, Tailwind):
 - Flask
 - tinycss2
 - BeautifulSoup4
-- tree-sitter==0.20.1 (or compatible)
+- tree-sitter (installed via platform-specific wheel using install.py)
 - Prebuilt shared libraries in `prebuilt/` (auto-managed by CI)
 - Node.js (only for Tailwind config parsing)
 - (See requirements.txt for full list)
