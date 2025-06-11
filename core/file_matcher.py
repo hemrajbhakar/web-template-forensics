@@ -127,8 +127,63 @@ def output_matched_pairs_json(exact, fuzzy, structure, contextual, filetype) -> 
         })
     return result
 
-def structure_match_html(unmatched1: List[str], unmatched2: List[str], dir1: str, dir2: str, threshold: float = 0.5) -> List[Tuple[str, str, float]]:
-    """Structure-based matching for HTML files using StructureComparator."""
+# Utility: Count meaningful nodes for ASTs (HTML, JSX, JS)
+def count_meaningful_nodes(tree, filetype):
+    """
+    Count meaningful top-level nodes in an AST.
+    For HTML: tags, for JSX: function/class/variable/JSX, for JS: function/class/variable/export/import.
+    """
+    if not tree:
+        return 0
+    if filetype == 'html':
+        # HTML: count top-level tags (not text/comments)
+        if isinstance(tree, dict):
+            return 1 if tree.get('type') == 'tag' else 0
+        return 0
+    elif filetype == 'jsx':
+        # JSX: count top-level function/class/variable/JSX elements
+        root = tree.get('root', tree)  # handle both dict and tree-sitter style
+        children = root.get('children', []) if isinstance(root, dict) else []
+        count = 0
+        for child in children:
+            if child.get('type') in (
+                'function_declaration', 'function_expression', 'arrow_function',
+                'class_declaration', 'variable_declaration',
+                'export_statement', 'export_default_declaration',
+                'jsx_element', 'jsx_fragment'
+            ):
+                count += 1
+        return count
+    elif filetype == 'js':
+        # JS: count top-level function/class/variable/export/import
+        root = tree.get('root', tree)
+        children = root.get('children', []) if isinstance(root, dict) else []
+        count = 0
+        for child in children:
+            if child.get('type') in (
+                'function_declaration', 'function_expression', 'arrow_function',
+                'class_declaration', 'variable_declaration',
+                'export_statement', 'export_default_declaration',
+                'import_declaration'
+            ):
+                count += 1
+        return count
+    return 0
+
+# Strict subtree similarity for single-node files (JSX/JS/HTML)
+def strict_single_node_similarity(tree1, tree2, filetype, comparator=None, analyzer=None):
+    # For HTML/JSX, use structure comparator; for JS, use analyzer's tree similarity
+    if filetype in ('html', 'jsx') and comparator:
+        # Compare the only meaningful node in each tree
+        return comparator.compare_structures(tree1, tree2).similarity_score
+    elif filetype == 'js' and analyzer:
+        # Use analyzer's _tree_similarity if available
+        if hasattr(analyzer, '_tree_similarity'):
+            return analyzer._tree_similarity(tree1, tree2)
+    return 0.0
+
+# --- Step 4: Structure-based matching with node count check ---
+def structure_match_html(unmatched1, unmatched2, dir1, dir2, threshold=0.5):
     parser = HTMLParser()
     comparator = StructureComparator()
     matches = []
@@ -137,11 +192,19 @@ def structure_match_html(unmatched1: List[str], unmatched2: List[str], dir1: str
         best_score = 0
         best_f2 = None
         tree1 = parser.parse_file(os.path.join(dir1, f1))
+        n1 = count_meaningful_nodes(tree1, 'html')
         for f2 in unmatched2:
             if f2 in used2:
                 continue
             tree2 = parser.parse_file(os.path.join(dir2, f2))
-            score = comparator.compare_structures(tree1, tree2).similarity_score
+            n2 = count_meaningful_nodes(tree2, 'html')
+            if n1 < 2 or n2 < 2:
+                if n1 == 1 and n2 == 1:
+                    score = strict_single_node_similarity(tree1, tree2, 'html', comparator=comparator)
+                else:
+                    score = 0.0
+            else:
+                score = comparator.compare_structures(tree1, tree2).similarity_score
             if score > best_score:
                 best_score = score
                 best_f2 = f2
@@ -150,8 +213,8 @@ def structure_match_html(unmatched1: List[str], unmatched2: List[str], dir1: str
             used2.add(best_f2)
     return matches
 
-def structure_match_css(unmatched1: List[str], unmatched2: List[str], dir1: str, dir2: str, threshold: float = 0.5) -> List[Tuple[str, str, float]]:
-    """Structure-based matching for CSS files using CSSStyleChecker."""
+def structure_match_css(unmatched1, unmatched2, dir1, dir2, threshold=0.5):
+    # CSS: less likely to have this issue, but can add a trivial check
     checker = CSSStyleChecker()
     matches = []
     used2 = set()
@@ -160,12 +223,17 @@ def structure_match_css(unmatched1: List[str], unmatched2: List[str], dir1: str,
         best_f2 = None
         with open(os.path.join(dir1, f1), 'r', encoding='utf-8') as f:
             css1 = f.read()
+        n1 = css1.count('{')  # crude: count rules
         for f2 in unmatched2:
             if f2 in used2:
                 continue
             with open(os.path.join(dir2, f2), 'r', encoding='utf-8') as f:
                 css2 = f.read()
-            score = checker.compare_css(css1, css2)["css_similarity"]
+            n2 = css2.count('{')
+            if n1 < 2 or n2 < 2:
+                score = checker.compare_css(css1, css2)["css_similarity"] if n1 == 1 and n2 == 1 else 0.0
+            else:
+                score = checker.compare_css(css1, css2)["css_similarity"]
             if score > best_score:
                 best_score = score
                 best_f2 = f2
@@ -174,8 +242,7 @@ def structure_match_css(unmatched1: List[str], unmatched2: List[str], dir1: str,
             used2.add(best_f2)
     return matches
 
-def structure_match_jsx(unmatched1: List[str], unmatched2: List[str], dir1: str, dir2: str, threshold: float = 0.5) -> List[Tuple[str, str, float]]:
-    """Structure-based matching for JSX/TSX files using StructureComparator and Node.js tree-sitter parser."""
+def structure_match_jsx(unmatched1, unmatched2, dir1, dir2, threshold=0.5):
     comparator = StructureComparator()
     matches = []
     used2 = set()
@@ -183,11 +250,19 @@ def structure_match_jsx(unmatched1: List[str], unmatched2: List[str], dir1: str,
         best_score = 0
         best_f2 = None
         tree1 = parse_jsx_with_treesitter(os.path.join(dir1, f1))
+        n1 = count_meaningful_nodes(tree1, 'jsx')
         for f2 in unmatched2:
             if f2 in used2:
                 continue
             tree2 = parse_jsx_with_treesitter(os.path.join(dir2, f2))
-            score = comparator.compare_structures(tree1, tree2).similarity_score
+            n2 = count_meaningful_nodes(tree2, 'jsx')
+            if n1 < 2 or n2 < 2:
+                if n1 == 1 and n2 == 1:
+                    score = strict_single_node_similarity(tree1, tree2, 'jsx', comparator=comparator)
+                else:
+                    score = 0.0
+            else:
+                score = comparator.compare_structures(tree1, tree2).similarity_score
             if score > best_score:
                 best_score = score
                 best_f2 = f2
@@ -196,37 +271,40 @@ def structure_match_jsx(unmatched1: List[str], unmatched2: List[str], dir1: str,
             used2.add(best_f2)
     return matches
 
-def structure_match_js(unmatched1: List[str], unmatched2: List[str], dir1: str, dir2: str, threshold: float = 0.5) -> List[Tuple[str, str, float]]:
-    """Structure-based matching for JS/TS files using tree-sitter parser."""
+def structure_match_js(unmatched1, unmatched2, dir1, dir2, threshold=0.5):
     analyzer = JSLogicAnalyzer()
     matches = []
     used2 = set()
-    
     for f1 in unmatched1:
         best_score = 0
         best_f2 = None
         path1 = os.path.join(dir1, f1)
-        
+        tree1 = analyzer._parse_file(path1) if hasattr(analyzer, '_parse_file') else None
+        n1 = count_meaningful_nodes(tree1, 'js') if tree1 else 0
         for f2 in unmatched2:
             if f2 in used2:
                 continue
             path2 = os.path.join(dir2, f2)
-            
-            try:
-                result = analyzer.compare_files(path1, path2)
-                score = result['similarity']
-                
-                if score > best_score:
-                    best_score = score
-                    best_f2 = f2
-            except Exception as e:
-                print(f"Error comparing {f1} and {f2}: {str(e)}")
-                continue
-                
+            tree2 = analyzer._parse_file(path2) if hasattr(analyzer, '_parse_file') else None
+            n2 = count_meaningful_nodes(tree2, 'js') if tree2 else 0
+            if n1 < 2 or n2 < 2:
+                if n1 == 1 and n2 == 1:
+                    score = strict_single_node_similarity(tree1, tree2, 'js', analyzer=analyzer)
+                else:
+                    score = 0.0
+            else:
+                try:
+                    result = analyzer.compare_files(path1, path2)
+                    score = result['similarity']
+                except Exception as e:
+                    print(f"Error comparing {f1} and {f2}: {str(e)}")
+                    score = 0.0
+            if score > best_score:
+                best_score = score
+                best_f2 = f2
         if best_score >= threshold and best_f2:
             matches.append((f1, best_f2, best_score))
             used2.add(best_f2)
-            
     return matches
 
 # Replace structure_match_stub with dispatcher
@@ -511,16 +589,24 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
     # JS
     for r in results.get('js', {}).get('matched_pairs', []):
         similarities.append(r.get('similarity', r.get('score', 0.0)))
-    # Tailwind classes
-    for r in tailwind_results:
-        similarities.append(r['similarity'])
-    # Tailwind config (as a virtual file, if present)
-    config_sim = results.get('tailwind', {}).get('config_similarity', None)
-    if config_sim is not None:
-        similarities.append(config_sim)
+    # Tailwind classes (count each per-file result as a file compared)
+    tailwind_files_compared = len(tailwind_results)
+    tailwind_similarities = [r['hybrid_similarity'] for r in tailwind_results]
+    # Store for reporting
+    if 'tailwind' in results:
+        results['tailwind']['files_compared'] = tailwind_files_compared
+    # Count unmatched files for all types
+    total_files = 0
+    for filetype in ['html', 'jsx', 'css', 'js']:
+        total_files += len(results.get(filetype, {}).get('matched_pairs', []))
+        total_files += len(results.get(filetype, {}).get('unmatched_files', {}).get('original', []))
+        total_files += len(results.get(filetype, {}).get('unmatched_files', {}).get('modified', []))
+    total_files += tailwind_files_compared
+    # Add zeros for unmatched files (already done for html/jsx/css/js above)
+    similarities += tailwind_similarities
     # Compute file-count-weighted average
-    if similarities:
-        overall_similarity = sum(similarities) / len(similarities)
+    if total_files > 0:
+        overall_similarity = sum(similarities) / total_files
     else:
         overall_similarity = 0.0
     results['overall_similarity'] = overall_similarity
