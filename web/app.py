@@ -27,6 +27,7 @@ from core.forensic_analyzer import ForensicAnalyzer
 from core.css_style_checker import CSSStyleChecker
 from core.file_matcher import unzip_to_tempdir, match_and_compare_all
 from core.ui_framework_analyzer import UIFrameworkAnalyzer
+from core.json_similarity_checker import analyze_json_similarity
 
 app = Flask(__name__)
 analyzer = ForensicAnalyzer()
@@ -341,6 +342,9 @@ def analyze_zip():
                 })
         # Run matcher
         results = match_and_compare_all(orig_dir, mod_dir)
+        # JSON similarity analysis
+        json_similarity = analyze_json_similarity(orig_dir, mod_dir)
+        results['json_similarity'] = json_similarity
         # Update summary['tailwind'] to use the robust structure
         tailwind = results.get('tailwind', {})
         results['summary'] = {
@@ -366,6 +370,10 @@ def analyze_zip():
         }
         # Ensure both similarity and similarity_scores['overall'] use the file-count-based value
         results['similarity_scores']['overall'] = results.get('overall_similarity', 0.0)
+        # Use the backend's summary as-is, but future-proof: always include all keys
+        summary = {k: v for k, v in results['summary'].items()}
+        summary['json_similarity'] = json_similarity
+        results['summary'] = summary
         # Optionally, save report for download
         report_path = TEMP_DIR / 'report.json'
         with open(report_path, 'w', encoding='utf-8') as f:
@@ -373,10 +381,12 @@ def analyze_zip():
         results['report_url'] = '/download/report'
         # Use the backend's summary as-is, but future-proof: always include all keys
         summary = {k: v for k, v in results['summary'].items()}
+        summary['json_similarity'] = json_similarity
+        # Remove the top-level json_similarity from compact_results
         compact_results = {
             'similarity': results.get('overall_similarity', 0.0),
             'similarity_scores': results.get('similarity_scores', {}),
-            'summary': summary,  # Use all keys present in backend summary
+            'summary': summary,  # Use all keys present in backend summary, now including json_similarity
             'file_matches': {
                 'html': results.get('html', {}).get('matched_pairs', []),
                 'css': results.get('css', {}).get('matched_pairs', []),
