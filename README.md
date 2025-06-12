@@ -1,6 +1,13 @@
 # Forensic Template Comparison Tool
 
-![version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![version](https://img.shields.io/badge/version-1.1.0-blue.svg)
+
+<div align="center" style="margin: 1.5em 0;">
+  <h2>🎯 <em>Similarity is shallow. Reuse runs deeper.</em></h2>
+  <p style="font-size: 1.1em; color: #555; margin-top: 0.5em;">
+    🧠 Not here to say they're just shaking hands — here to hint one might be standing on the other's shoulders.
+  </p>
+</div>
 
 ## Author
 **Hemraj Bhakar**  \
@@ -31,6 +38,8 @@ This tool performs forensic comparison of two zipped web project folders, analyz
 - **Extensible UI framework analyzer system** (easy to add analyzers for other frameworks)
 - **Robust similarity scoring** with penalization for unmatched files
 - **Detailed JSON and UI reporting**
+- **Boilerplate-Aware Comparison:**
+  - Common dependencies (`react`, `react-dom`, `next`) and common scripts (`dev`, `build`, `start`, `lint`) are excluded from key similarity checks. Only custom/rare scripts and dependencies are considered for plagiarism signal.
 
 ---
 
@@ -113,13 +122,22 @@ The tool performs deep, structure-aware comparison of JavaScript and TypeScript 
 ### 5. Scoring and Penalization (Updated)
 - For each file type, the aggregate similarity score is:
   ```
-  final_score = (sum of all similarity scores for matched pairs + 0.0 for each unmatched file) / total number of files involved
+  final_score = (sum of all similarity scores for matched pairs + 0.0 for each unmatched file + JSON config virtual file scores) / total number of files involved (including JSON virtual files if present)
   ```
   - **Unmatched files** are penalized as 0.0 in the score.
   - **Overall Similarity (File-Count-Based Average):**
-    - The overall similarity is calculated as a file-count-based average of all per-file-type similarities (HTML, CSS, JSX/TSX, JS/TS, Tailwind, etc.).
-    - This means every matched or unmatched file contributes equally to the final score, making the approach robust and fair regardless of project composition.
+    - The overall similarity is calculated as a file-count-based average of all per-file-type similarities (HTML, CSS, JSX/TSX, JS/TS, Tailwind, etc.), **plus JSON config files as virtual files if present**.
+    - This means every matched or unmatched file, and each present config file, contributes equally to the final score, making the approach robust and fair regardless of project composition.
     - This method is preferred over a fixed weighted average, as it adapts to the actual file distribution in the compared projects.
+
+#### 📦 JSON Config Virtual File Weights
+| File            | Virtual File Count Weight | When Counted?                | Justification                                                |
+| --------------- | ------------------------ | ---------------------------- | ------------------------------------------------------------ |
+| `package.json`  | **2 files worth**        | Only if present in both zips | Contains dependencies, versions, scripts (multiple domains)  |
+| `tsconfig.json` | **1 file worth**         | Only if present in both zips | Affects build, plugins, strictness — useful but lower impact |
+
+- If a config file is missing in both projects, it is ignored and does not affect the overall score.
+- If present, its similarity is counted as the specified number of virtual files in the denominator and numerator.
 
 ### Recent Improvements & Robustness
 - **Identifier/Literal Normalization:** Robust to renaming and literal changes.
@@ -127,6 +145,10 @@ The tool performs deep, structure-aware comparison of JavaScript and TypeScript 
 - **Deep Tree-Based Function/Component Body Comparison:** Robust to reordering, minor edits, and structural changes in logic-heavy files.
 - **JSX/TSX Logic:** Now includes deep function/component body comparison, not just markup structure.
 - **All weights and logic are documented above and kept up to date with the codebase.**
+- **Boilerplate-Aware JSON Comparison:**
+  - Common dependencies (`react`, `react-dom`, `next`) are excluded from dependency key similarity checks.
+  - Common scripts (`dev`, `build`, `start`, `lint`) are excluded from script similarity checks.
+  - Only custom/rare scripts and dependencies are considered for plagiarism signal.
 
 ### 6. Output & Reporting
 - The tool returns a detailed JSON report including per-type summaries, file matches, and overall similarity verdicts.
@@ -239,3 +261,11 @@ MIT License
 - Flask for web interface
 - Chart.js for visualizations
 - TailwindCSS for styling 
+
+---
+
+<div align="center" style="margin-top: 2em; font-style: italic; color: #888;">
+  <strong>"Doesn't scream 'plagiarism' but whispers possibility."</strong>
+</div>
+
+---

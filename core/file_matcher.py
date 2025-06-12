@@ -595,6 +595,20 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
     # Store for reporting
     if 'tailwind' in results:
         results['tailwind']['files_compared'] = tailwind_files_compared
+    # --- JSON config similarity (package.json, tsconfig.json) ---
+    json_similarities = []
+    json_virtual_file_count = 0
+    json_summary = results.get('json_similarity', {}) if 'json_similarity' in results else {}
+    # If package.json similarity is present, count as 2 files
+    pkg_score = json_summary.get('package_json')
+    if pkg_score is not None:
+        json_similarities.extend([pkg_score, pkg_score])  # 2 virtual files
+        json_virtual_file_count += 2
+    # If tsconfig.json similarity is present, count as 1 file
+    ts_score = json_summary.get('tsconfig_json')
+    if ts_score is not None:
+        json_similarities.append(ts_score)
+        json_virtual_file_count += 1
     # Count unmatched files for all types
     total_files = 0
     for filetype in ['html', 'jsx', 'css', 'js']:
@@ -602,8 +616,10 @@ def match_and_compare_all(original_dir: str, modified_dir: str) -> Dict:
         total_files += len(results.get(filetype, {}).get('unmatched_files', {}).get('original', []))
         total_files += len(results.get(filetype, {}).get('unmatched_files', {}).get('modified', []))
     total_files += tailwind_files_compared
-    # Add zeros for unmatched files (already done for html/jsx/css/js above)
+    total_files += json_virtual_file_count  # Add virtual file count for JSON configs
+    # Add all similarity scores (including JSON virtual files)
     similarities += tailwind_similarities
+    similarities += json_similarities
     # Compute file-count-weighted average
     if total_files > 0:
         overall_similarity = sum(similarities) / total_files

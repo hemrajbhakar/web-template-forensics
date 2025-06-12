@@ -33,6 +33,11 @@ This roadmap outlines the completed, ongoing, and planned features for the Foren
 - 🧾 Improved JSON report structure and UI transparency
 - 🧮 Penalization logic for unmatched files/components/selectors/classes
 - 📚 Full update of documentation and README to reflect new logic
+- 📦 JSON comparison for `package.json` and `tsconfig.json` files
+- 🚫 Boilerplate-aware logic for JSON: common dependencies (`react`, `react-dom`, `next`) and scripts (`dev`, `build`, `start`, `lint`) excluded from key similarity checks
+- 🧾 Stricter meta field scoring: exact, normalized match for `name`, `version`, `description`, `author`; Jaccard for `keywords`
+- 🔢 Config file weighting: `package.json` is counted as 2 virtual files and `tsconfig.json` as 1 virtual file in the overall similarity score, but only if present, for fairer config impact
+- 🔄 Weight reallocation: missing section weights reallocated to dependencies for more meaningful score
 
 ---
 

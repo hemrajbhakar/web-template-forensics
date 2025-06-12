@@ -49,6 +49,13 @@ All notable changes to this project will be documented in this file.
 - Shared/unique value detection.
 - Deep object diffing preparation for future enhancements.
 
+### 📦 JSON Comparison
+- Added comparison for `package.json` and `tsconfig.json` files.
+- Boilerplate-aware logic: common dependencies (`react`, `react-dom`, `next`) and scripts (`dev`, `build`, `start`, `lint`) are excluded from key similarity checks.
+- Stricter meta field scoring: exact, normalized match for `name`, `version`, `description`, `author`; Jaccard for `keywords`.
+- **Config file weighting:** `package.json` is counted as 2 virtual files and `tsconfig.json` as 1 virtual file in the overall file-count-based average, but only if present. This ensures config files have a fair, proportional impact on the overall similarity score.
+- Weight reallocation: if a section is missing in both files, its weight is reallocated to dependencies for a more meaningful score.
+
 ---
 
 ## 🎉 v1.0.0 (First Release)
