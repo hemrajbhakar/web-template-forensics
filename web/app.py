@@ -344,7 +344,7 @@ def analyze_zip():
         results = match_and_compare_all(orig_dir, mod_dir)
         # JSON similarity analysis
         json_similarity = analyze_json_similarity(orig_dir, mod_dir)
-        results['json_similarity'] = json_similarity
+        # results['json_similarity'] = json_similarity
         # Update summary['tailwind'] to use the robust structure
         tailwind = results.get('tailwind', {})
         results['summary'] = {
@@ -366,7 +366,8 @@ def analyze_zip():
             'jsx': jsx_score,
             'css': css_score,
             'js': results.get('js', {}).get('aggregate_score', 0.0),
-            'tailwind': tailwind_score
+            'tailwind': tailwind_score,
+            'json_similarity': json_similarity
         }
         # Ensure both similarity and similarity_scores['overall'] use the file-count-based value
         results['similarity_scores']['overall'] = results.get('overall_similarity', 0.0)
