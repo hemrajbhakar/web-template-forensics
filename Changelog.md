@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ---
 
 ## 🚀 v1.1.0 (Current)
+**Released: 2025-06-14**
 
 ### 🔧 General
 - Major robustness improvements across all similarity checkers.

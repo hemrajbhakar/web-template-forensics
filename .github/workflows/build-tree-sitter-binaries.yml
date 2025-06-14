@@ -2,7 +2,7 @@ name: Build Tree-sitter Parsers
 
 on:
   push:
-    tags: ['v*']
+    # tags: ['v*']
   workflow_dispatch:  # Manual trigger when needed
 
 jobs:
@@ -240,7 +240,7 @@ jobs:
           
           # Commit and push
           if [ -n "$(git status --porcelain prebuilt/)" ]; then
-            git commit -m "🤖 Update prebuilt parser binaries for all platforms"
+            git commit -m "Released with Update prebuilt parser binaries for all platforms"
             git push origin ${{ github.ref }}
           else
             echo "No changes to commit in prebuilt directory"
