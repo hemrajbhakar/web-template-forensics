@@ -15,11 +15,17 @@ MARKER_FILE = ".setup_done"
 def run_script_once():
     if not os.path.exists(MARKER_FILE):
         print("Running setup install.py for the first time...")
-        subprocess.run(["python", "../install.py"], check=True)
+
+        script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "install.py"))
+        print("Resolved install.py path:", script_path)
+
+        subprocess.run(["python", script_path], check=True)
+
         with open(MARKER_FILE, "w") as f:
             f.write("done")
     else:
         print("Setup already completed. Skipping install.py.")
+
 
 # Call setup once
 run_script_once()
