@@ -9,6 +9,7 @@ from pathlib import Path
 import json
 import glob
 import tree_sitter
+import subprocess
 try:
     import importlib.metadata
     version = importlib.metadata.version("tree-sitter")
@@ -17,6 +18,20 @@ except ImportError:
     version = pkg_resources.get_distribution("tree-sitter").version
 
 print("Python version:", sys.version)
+
+MARKER_FILE = ".setup_done"
+
+def run_script_once():
+    if not os.path.exists(MARKER_FILE):
+        print("Running setup script.py for the first time...")
+        subprocess.run(["python", "web/script.py"], check=True)
+        with open(MARKER_FILE, "w") as f:
+            f.write("done")
+    else:
+        print("Setup already completed. Skipping script.py.")
+
+# Call setup once
+run_script_once()
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
