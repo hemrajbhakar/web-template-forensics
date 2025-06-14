@@ -15,7 +15,7 @@ MARKER_FILE = ".setup_done"
 def run_script_once():
     if not os.path.exists(MARKER_FILE):
         print("Running setup install.py for the first time...")
-        subprocess.run(["python", "web/install.py"], check=True)
+        subprocess.run(["python", "../install.py"], check=True)
         with open(MARKER_FILE, "w") as f:
             f.write("done")
     else:
